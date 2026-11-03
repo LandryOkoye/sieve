@@ -16,6 +16,9 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "@sieve/chain-sui": "workspace:*",
+    "@sieve/contracts": "workspace:*",
+    "@sieve/detector": "workspace:*",
     "jose": "^6.2.12",
     "pg": "^8.23.1"
   }

@@ -10,6 +10,15 @@ importers:
 
   apps/api:
     dependencies:
+      '@sieve/chain-sui':
+        specifier: workspace:*
+        version: link:../../packages/chain-sui
+      '@sieve/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@sieve/detector':
+        specifier: workspace:*
+        version: link:../../packages/detector
       jose:
         specifier: ^6.2.12
         version: 6.2.15

@@ -1,6 +1,7 @@
 import { ChannelCredentials } from "@grpc/grpc-js";
 import { GrpcTransport } from "@protobuf-ts/grpc-transport";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { isValidSuiObjectId, isValidTransactionDigest, normalizeSuiObjectId } from "@mysten/sui/utils";
 import type { SuiNetwork } from "@sieve/contracts";
 
 export type TatumSuiConfig = {
@@ -16,7 +17,16 @@ const transactionReadMask = [
   "transaction",
   "effects.status",
   "effects.changed_objects",
-  "events",
+  "events.events.json",
+  "events.events.event_type",
+  "events.events.event_index",
+  "events.events.package_id",
+  "events.events.module",
+  "events.events.sender",
+  "objects.objects.json",
+  "objects.objects.object_id",
+  "objects.objects.object_type",
+  "objects.objects.owner",
   "balance_changes",
 ];
 
@@ -27,8 +37,20 @@ const objectReadMask = [
   "owner",
   "object_type",
   "contents",
+  "json",
+  "display.output",
   "previous_transaction",
 ];
+
+export function validateTarget(target: { kind: "transaction"; digest: string } | { kind: "object"; objectId: string }): boolean {
+  return target.kind === "transaction"
+    ? isValidTransactionDigest(target.digest)
+    : isValidSuiObjectId(target.objectId);
+}
+
+export function normalizeObjectId(objectId: string): string {
+  return normalizeSuiObjectId(objectId);
+}
 
 export class TatumSuiClient {
   private readonly network: SuiNetwork;

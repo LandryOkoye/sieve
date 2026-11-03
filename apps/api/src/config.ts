@@ -1,7 +1,8 @@
-export type IntegrationStatus = "unverified" | "not_configured";
+export type IntegrationStatus = "available" | "unavailable" | "unverified" | "not_configured";
 
 export type ApiConfig = {
   port: number;
+  databaseUrl: string | undefined;
   integrations: {
     database: IntegrationStatus;
     tatum: IntegrationStatus;
@@ -46,6 +47,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
 
   return {
     port: parsePort(environment.API_PORT),
+    databaseUrl: environment.DATABASE_URL,
     integrations: {
       database: integrationStatus(Boolean(environment.DATABASE_URL)),
       tatum: integrationStatus(Boolean(environment.TATUM_API_KEY)),

@@ -14,6 +14,8 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `MEMWAL_SERVER_URL` | Optional Walrus Memory relayer URL |
 | `MEMWAL_NAMESPACE` | Optional namespace for SIEVE threat memories |
 
-The liveness route reports whether the process is running. Readiness remains
-`not_ready` until actual dependency checks are implemented; configured values
-are reported as `unverified`, never as a successful connection.
+The liveness route reports whether the process is running. Readiness applies
+the SQL migrations and checks PostgreSQL when `DATABASE_URL` is configured.
+Tatum and Walrus are reported as `unverified` until their connection checks are
+wired in; configured values are never reported as a successful connection by
+presence alone.

@@ -1,10 +1,22 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { loadConfig } from "./config.js";
 import { Database } from "./database.js";
+import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 
 const config = loadConfig();
 const database = config.databaseUrl ? new Database(config.databaseUrl) : undefined;
+const authenticator = config.auth ? new OidcAuthenticator(config.auth) : undefined;
 let databaseInitialized = false;
+
+async function ensureDatabase(): Promise<Database> {
+  if (!database) throw new Error("Database is not configured");
+  if (!databaseInitialized) {
+    await database.migrate();
+    databaseInitialized = true;
+  }
+  await database.checkConnection();
+  return database;
+}
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -26,15 +38,19 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     const integrations = { ...config.integrations };
     if (database) {
       try {
-        if (!databaseInitialized) {
-          await database.migrate();
-          databaseInitialized = true;
-        }
-        await database.checkConnection();
+        await ensureDatabase();
         integrations.database = "available";
       } catch {
         databaseInitialized = false;
         integrations.database = "unavailable";
+      }
+    }
+    if (authenticator) {
+      try {
+        await authenticator.checkConnection();
+        integrations.authentication = "available";
+      } catch {
+        integrations.authentication = "unavailable";
       }
     }
     const ready = Object.values(integrations).every((status) => status === "available");
@@ -42,6 +58,34 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       status: ready ? "ready" : "not_ready",
       integrations,
     });
+    return;
+  }
+
+  if (request.url === "/api/v1/me") {
+    if (!authenticator) {
+      sendJson(response, 503, { error: "authentication_not_configured" });
+      return;
+    }
+    let principal: AuthenticatedPrincipal;
+    try {
+      principal = await authenticator.authenticate(request.headers.authorization);
+    } catch {
+      try {
+        await authenticator.checkConnection();
+      } catch {
+        sendJson(response, 503, { error: "authentication_provider_unavailable" });
+        return;
+      }
+      sendJson(response, 401, { error: "unauthenticated" });
+      return;
+    }
+    try {
+      const store = await ensureDatabase();
+      const userId = await store.resolveUserId(principal.issuer, principal.subject);
+      sendJson(response, 200, { userId });
+    } catch {
+      sendJson(response, 503, { error: "identity_store_unavailable" });
+    }
     return;
   }
 

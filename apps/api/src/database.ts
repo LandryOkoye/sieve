@@ -1,4 +1,5 @@
 import { readdir, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 
@@ -21,6 +22,20 @@ export class Database {
 
   async checkConnection(): Promise<void> {
     await this.pool.query("SELECT 1");
+  }
+
+  async resolveUserId(issuer: string, subject: string): Promise<string> {
+    const result = await this.pool.query<{ id: string }>(
+      `INSERT INTO app_users (id, identity_issuer, identity_subject)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (identity_issuer, identity_subject)
+       DO UPDATE SET identity_subject = EXCLUDED.identity_subject
+       RETURNING id`,
+      [randomUUID(), issuer, subject],
+    );
+    const user = result.rows[0];
+    if (!user) throw new Error("Could not resolve application user");
+    return user.id;
   }
 
   async migrate(): Promise<void> {

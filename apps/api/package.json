@@ -16,6 +16,7 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "jose": "^6.2.12",
     "pg": "^8.23.1"
   }
 }

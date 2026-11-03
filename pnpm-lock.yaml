@@ -10,6 +10,9 @@ importers:
 
   apps/api:
     dependencies:
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.15
       pg:
         specifier: ^8.23.1
         version: 8.23.1
@@ -451,6 +454,9 @@ packages:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
     engines: {node: '>=8'}
 
+  jose@6.2.15:
+    resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
+
   lodash.camelcase@4.3.0:
     resolution: {integrity: sha512-TwuEnCnxbc3rAvhf/LbG7tJUDzhqXyFnv3dtzLOPgCG/hODL7WFnsbwktkD7yUV0RrreP/l1PALq/YSg6VvjlA==}
 
@@ -889,6 +895,8 @@ snapshots:
   graphql@17.0.2: {}
 
   is-fullwidth-code-point@3.0.0: {}
+
+  jose@6.2.15: {}
 
   lodash.camelcase@4.3.0: {}
 

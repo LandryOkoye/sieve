@@ -1,0 +1,25 @@
+{
+  "name": "@sieve/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "@sieve/chain-sui": "workspace:*",
+    "@sieve/contracts": "workspace:*",
+    "@sieve/detector": "workspace:*",
+    "jose": "^6.2.12",
+    "pg": "^8.23.1"
+  }
+}

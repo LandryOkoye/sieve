@@ -4,14 +4,16 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/policy.ts"
+    "./policy": "./src/policy.ts",
+    "./walrus": "./src/walrus.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@sieve/contracts": "workspace:*",
-    "@sieve/detector": "workspace:*"
+    "@sieve/detector": "workspace:*",
+    "@mysten-incubation/memwal": "^0.1.10"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

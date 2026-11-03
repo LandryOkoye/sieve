@@ -5,6 +5,8 @@ export type IntegrationStatus = "available" | "unavailable" | "unverified" | "no
 export type ApiConfig = {
   port: number;
   databaseUrl: string | undefined;
+  tatumApiKey: string | undefined;
+  suiNetwork: "mainnet" | "testnet";
   auth: OidcConfig | undefined;
   integrations: {
     database: IntegrationStatus;
@@ -71,6 +73,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
   return {
     port: parsePort(environment.API_PORT),
     databaseUrl: environment.DATABASE_URL,
+    tatumApiKey: environment.TATUM_API_KEY,
+    suiNetwork: network,
     auth,
     integrations: {
       database: integrationStatus(Boolean(environment.DATABASE_URL)),

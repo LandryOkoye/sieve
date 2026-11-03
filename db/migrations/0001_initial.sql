@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE TABLE app_users (
   id text PRIMARY KEY,
   identity_issuer text NOT NULL,
@@ -86,5 +84,3 @@ CREATE TABLE audit_events (
 );
 CREATE INDEX audit_events_user_created
   ON audit_events (user_id, created_at DESC, id DESC);
-
-COMMIT;

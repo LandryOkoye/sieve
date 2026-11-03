@@ -9,11 +9,6 @@ export type TatumSuiConfig = {
   timeoutMs?: number;
 };
 
-const endpointByNetwork: Record<SuiNetwork, string> = {
-  mainnet: "sui-mainnet-grpc.gateway.tatum.io:443",
-  testnet: "sui-testnet-grpc.gateway.tatum.io:443",
-};
-
 const transactionReadMask = [
   "digest",
   "checkpoint",
@@ -44,8 +39,11 @@ export class TatumSuiClient {
   constructor(config: TatumSuiConfig) {
     this.network = config.network;
     this.timeoutMs = config.timeoutMs ?? 10_000;
+    const endpoint = config.network === "mainnet"
+      ? "sui-mainnet-grpc.gateway.tatum.io:443"
+      : "sui-testnet-grpc.gateway.tatum.io:443";
     this.transport = new GrpcTransport({
-      host: endpointByNetwork[config.network],
+      host: endpoint,
       channelCredentials: ChannelCredentials.createSsl(),
       meta: { "x-api-key": config.apiKey },
     });

@@ -12,7 +12,8 @@
   "dependencies": {
     "@grpc/grpc-js": "^1.14.5",
     "@mysten/sui": "^2.36.0",
-    "@protobuf-ts/grpc-transport": "^2.11.1"
+    "@protobuf-ts/grpc-transport": "^2.11.1",
+    "@sieve/contracts": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.7.0"

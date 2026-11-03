@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { loadConfig } from "./config.js";
 
-const port = Number(process.env.API_PORT ?? 3001);
-const requiredIntegrations = ["DATABASE_URL", "TATUM_API_KEY", "MEMWAL_ACCOUNT_ID", "MEMWAL_PRIVATE_KEY"];
+const config = loadConfig();
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -22,10 +22,7 @@ function handleRequest(request: IncomingMessage, response: ServerResponse): void
   if (request.url === "/api/v1/health/ready") {
     sendJson(response, 503, {
       status: "not_ready",
-      integrations: requiredIntegrations.map((name) => ({
-        name,
-        status: process.env[name] ? "unverified" : "not_configured",
-      })),
+      integrations: config.integrations,
     });
     return;
   }
@@ -35,6 +32,6 @@ function handleRequest(request: IncomingMessage, response: ServerResponse): void
 
 const server = createServer(handleRequest);
 
-server.listen(port, "0.0.0.0", () => {
-  process.stdout.write(`SIEVE API listening on port ${port}\n`);
+server.listen(config.port, "0.0.0.0", () => {
+  process.stdout.write(`SIEVE API listening on port ${config.port}\n`);
 });

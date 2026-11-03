@@ -1,0 +1,168 @@
+openapi: 3.1.0
+info:
+  title: SIEVE API
+  version: 0.1.0
+  description: Authenticated Sui evidence inspection and case history.
+servers:
+  - url: /
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/health/live:
+    get:
+      security: []
+      summary: Check process liveness
+      responses:
+        '200':
+          description: The API process is running.
+  /api/v1/health/ready:
+    get:
+      security: []
+      summary: Check configured integration readiness
+      responses:
+        '200':
+          description: All configured integrations are available.
+        '503':
+          description: One or more integrations are unavailable or not configured.
+  /api/v1/me:
+    get:
+      summary: Resolve the authenticated application user
+      responses:
+        '200':
+          description: The caller's application user identifier.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [userId]
+                properties:
+                  userId: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /api/v1/cases:
+    post:
+      summary: Queue a Sui object or transaction inspection
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema: { type: string, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                network: { type: string, enum: [mainnet, testnet] }
+                digest: { type: string, description: Sui transaction digest }
+                objectId: { type: string, description: Sui object ID }
+              oneOf:
+                - required: [digest]
+                - required: [objectId]
+      responses:
+        '202':
+          description: Case persisted and queued for asynchronous processing.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InspectionCase' }
+        '200':
+          description: Existing case returned for an idempotent replay.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InspectionCase' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: The idempotency key was already used for a different request.
+    get:
+      summary: List the caller's cases
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string, description: Opaque cursor returned as nextCursor }
+      responses:
+        '200':
+          description: A page of owner-scoped inspection cases.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cases, limit, nextCursor]
+                properties:
+                  cases:
+                    type: array
+                    items: { $ref: '#/components/schemas/InspectionCase' }
+                  limit: { type: integer }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/cases/{caseId}:
+    parameters:
+      - in: path
+        name: caseId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Retrieve an owner-scoped case and its latest assessment
+      responses:
+        '200':
+          description: Inspection case state and evidence.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InspectionCase' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/cases/{caseId}/retry:
+    parameters:
+      - in: path
+        name: caseId
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Requeue an owner-scoped failed case
+      responses:
+        '202':
+          description: Failed case has been queued for another attempt.
+        '404':
+          description: The case is not owned by the caller or is not failed.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Unauthenticated:
+      description: A valid bearer token is required.
+    BadRequest:
+      description: Request validation failed.
+    NotFound:
+      description: The case does not exist for this caller.
+  schemas:
+    InspectionCase:
+      type: object
+      required: [id, network, target, status, evidence, assessment, failureCode, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        network: { type: string, enum: [mainnet, testnet] }
+        target:
+          oneOf:
+            - type: object
+              required: [kind, digest]
+              properties:
+                kind: { const: transaction }
+                digest: { type: string }
+            - type: object
+              required: [kind, objectId]
+              properties:
+                kind: { const: object }
+                objectId: { type: string }
+        status:
+          type: string
+          enum: [queued, fetching_evidence, assessing, completed, failed]
+        evidence: { type: [object, 'null'] }
+        assessment: { type: [object, 'null'] }
+        failureCode: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

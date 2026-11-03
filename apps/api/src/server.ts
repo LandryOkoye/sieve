@@ -10,11 +10,13 @@ const config = loadConfig();
 const database = config.databaseUrl ? new Database(config.databaseUrl) : undefined;
 const authenticator = config.auth ? new OidcAuthenticator(config.auth) : undefined;
 let databaseInitialized = false;
+let queueWorkerBusy = false;
 
 async function ensureDatabase(): Promise<Database> {
   if (!database) throw new Error("Database is not configured");
   if (!databaseInitialized) {
     await database.migrate();
+    await database.recoverInterruptedCases();
     databaseInitialized = true;
   }
   await database.checkConnection();
@@ -122,8 +124,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         }
         const created = await store.createCase(userId, network, target, idempotencyKey);
         if (created.created) {
-          const inspectionCase = await processCase(store, userId, created.inspectionCase, network);
-          sendJson(response, inspectionCase.status === "failed" ? 502 : 201, inspectionCase);
+          sendJson(response, 202, created.inspectionCase);
         } else {
           if (created.inspectionCase.network !== network || JSON.stringify(created.inspectionCase.target) !== JSON.stringify(target)) {
             sendJson(response, 409, { error: "idempotency_key_conflict" });
@@ -133,14 +134,27 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         }
         return;
       }
+      const retryMatch = requestUrl.pathname.match(/^\/api\/v1\/cases\/([0-9a-f-]{36})\/retry$/i);
+      if (request.method === "POST" && retryMatch) {
+        const accepted = await store.retryCase(userId, retryMatch[1]!);
+        if (!accepted) {
+          sendJson(response, 404, { error: "retry_not_available" });
+          return;
+        }
+        sendJson(response, 202, { id: retryMatch[1], status: "queued" });
+        return;
+      }
       if (request.method === "GET" && requestUrl.pathname === "/api/v1/cases") {
         const limit = parseBoundedInt(requestUrl.searchParams.get("limit"), 20, 1, 100);
-        const offset = parseBoundedInt(requestUrl.searchParams.get("offset"), 0, 0, 10_000);
-        if (limit === null || offset === null) {
+        const cursorParam = requestUrl.searchParams.get("cursor");
+        const cursor = cursorParam ? decodeCursor(cursorParam) : undefined;
+        if (limit === null || (cursorParam && !cursor)) {
           sendJson(response, 400, { error: "invalid_pagination" });
           return;
         }
-        sendJson(response, 200, { cases: await store.listCases(userId, limit, offset), limit, offset });
+        const page = await store.listCases(userId, limit, cursor ?? undefined);
+        const nextCursor = page.hasMore && page.lastCursor ? encodeCursor(page.lastCursor) : null;
+        sendJson(response, 200, { cases: page.cases, limit, nextCursor });
         return;
       }
       const caseMatch = requestUrl.pathname.match(/^\/api\/v1\/cases\/([0-9a-f-]{36})$/i);
@@ -186,6 +200,24 @@ function parseBoundedInt(value: string | null, fallback: number, minimum: number
   if (!/^\d+$/.test(value)) return null;
   const number = Number(value);
   return Number.isSafeInteger(number) && number >= minimum && number <= maximum ? number : null;
+}
+
+function encodeCursor(cursor: { createdAt: string; id: string }): string {
+  return Buffer.from(JSON.stringify(cursor)).toString("base64url");
+}
+
+function decodeCursor(value: string): { createdAt: string; id: string } | null {
+  if (value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (!parsed || typeof parsed !== "object") return null;
+    const cursor = parsed as { createdAt?: unknown; id?: unknown };
+    if (typeof cursor.createdAt !== "string" || !Number.isFinite(Date.parse(cursor.createdAt))) return null;
+    if (typeof cursor.id !== "string" || !/^[0-9a-f-]{36}$/i.test(cursor.id)) return null;
+    return { createdAt: cursor.createdAt, id: cursor.id };
+  } catch {
+    return null;
+  }
 }
 
 function protobufValueToJson(value: unknown, depth = 0): unknown {
@@ -255,6 +287,8 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
       if (display) collectText(display, "object.display", evidence, untrustedText);
     } else {
       providerMethod = "ledgerService.getTransaction";
+      completeness = "partial";
+      warnings.push("Transaction command arguments and BCS-only fields were not decoded; text extraction may be incomplete.");
       const transaction = await client.getTransaction(inspectionCase.target.digest) as any;
       const evidence = { digest: inspectionCase.target.digest };
       addFact(facts, "digest", transaction.digest ?? null, evidence);
@@ -301,12 +335,30 @@ const server = createServer((request, response) => {
   });
 });
 
+async function runQueueWorker(): Promise<void> {
+  if (queueWorkerBusy || !database) return;
+  queueWorkerBusy = true;
+  try {
+    const store = await ensureDatabase();
+    const claimed = await store.claimNextCase();
+    if (claimed) await processCase(store, claimed.userId, claimed.inspectionCase, claimed.inspectionCase.network);
+  } catch {
+    process.stderr.write("Case queue worker could not process its next item.\n");
+  } finally {
+    queueWorkerBusy = false;
+  }
+}
+
+const queueWorker = setInterval(() => { void runQueueWorker(); }, 1_000);
+queueWorker.unref();
+
 server.listen(config.port, "0.0.0.0", () => {
   process.stdout.write(`SIEVE API listening on port ${config.port}\n`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    clearInterval(queueWorker);
     server.close(() => {
       void database?.close();
     });

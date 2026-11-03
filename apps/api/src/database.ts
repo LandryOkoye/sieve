@@ -68,6 +68,37 @@ export class Database {
     if (result.rowCount !== 1) throw new Error("Inspection case was not found");
   }
 
+  async recoverInterruptedCases(): Promise<void> {
+    await this.pool.query(
+      `UPDATE inspection_cases SET status = 'queued', failure_code = NULL, updated_at = now()
+       WHERE status IN ('fetching_evidence', 'assessing') AND updated_at < now() - interval '2 minutes'`,
+    );
+  }
+
+  async claimNextCase(): Promise<{ userId: string; inspectionCase: InspectionCase } | null> {
+    const result = await this.pool.query<{ id: string; user_id: string }>(
+      `WITH next_case AS (
+         SELECT id FROM inspection_cases WHERE status = 'queued'
+         ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
+       )
+       UPDATE inspection_cases c SET status = 'fetching_evidence', failure_code = NULL, updated_at = now()
+       FROM next_case WHERE c.id = next_case.id RETURNING c.id, c.user_id`,
+    );
+    const claimed = result.rows[0];
+    if (!claimed) return null;
+    const inspectionCase = await this.getCase(claimed.user_id, claimed.id);
+    return inspectionCase ? { userId: claimed.user_id, inspectionCase } : null;
+  }
+
+  async retryCase(userId: string, caseId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE inspection_cases SET status = 'queued', failure_code = NULL, updated_at = now()
+       WHERE id = $1 AND user_id = $2 AND status = 'failed'`,
+      [caseId, userId],
+    );
+    return result.rowCount === 1;
+  }
+
   async saveAssessment(userId: string, caseId: string, verdict: DetectorVerdict): Promise<void> {
     const client = await this.pool.connect();
     try {
@@ -95,9 +126,26 @@ export class Database {
     return result.rows[0] ? toInspectionCase(result.rows[0]) : null;
   }
 
-  async listCases(userId: string, limit: number, offset: number): Promise<InspectionCase[]> {
-    const result = await this.pool.query<CaseRow>(caseSelect + " WHERE c.user_id = $1 ORDER BY c.created_at DESC, c.id DESC LIMIT $2 OFFSET $3", [userId, limit, offset]);
-    return result.rows.map(toInspectionCase);
+  async listCases(userId: string, limit: number, cursor?: { createdAt: string; id: string }): Promise<{ cases: InspectionCase[]; hasMore: boolean; lastCursor: { createdAt: string; id: string } | null }> {
+    const values: unknown[] = [userId];
+    let cursorClause = "";
+    if (cursor) {
+      values.push(cursor.createdAt, cursor.id);
+      cursorClause = " AND (c.created_at, c.id) < ($2::timestamptz, $3::text)";
+    }
+    values.push(limit + 1);
+    const result = await this.pool.query<CaseRow & { cursor_created_at: string }>(
+      caseSelect + ` WHERE c.user_id = $1${cursorClause} ORDER BY c.created_at DESC, c.id DESC LIMIT $${values.length}`,
+      values,
+    );
+    const hasMore = result.rows.length > limit;
+    const rows = result.rows.slice(0, limit);
+    const last = rows.at(-1);
+    return {
+      cases: rows.map(toInspectionCase),
+      hasMore,
+      lastCursor: last ? { createdAt: last.cursor_created_at, id: last.id } : null,
+    };
   }
 
   async migrate(): Promise<void> {
@@ -147,7 +195,7 @@ type CaseRow = {
   status: InspectionCase["status"]; evidence: EvidenceBundle | null; failure_code: string | null; created_at: Date; updated_at: Date; assessment: DetectorVerdict | null;
 };
 
-const caseSelect = `SELECT c.id, c.network, c.target_kind, c.transaction_digest, c.object_id, c.status, c.evidence, c.failure_code, c.created_at, c.updated_at,
+const caseSelect = `SELECT c.id, c.network, c.target_kind, c.transaction_digest, c.object_id, c.status, c.evidence, c.failure_code, c.created_at, c.created_at::text AS cursor_created_at, c.updated_at,
   (SELECT ar.result FROM assessment_revisions ar WHERE ar.case_id = c.id ORDER BY ar.revision DESC LIMIT 1) AS assessment
   FROM inspection_cases c`;
 

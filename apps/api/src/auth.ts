@@ -14,6 +14,7 @@ export type AuthenticatedPrincipal = {
 export class OidcAuthenticator {
   private readonly config: OidcConfig;
   private readonly jwks: ReturnType<typeof createRemoteJWKSet>;
+  private checkedAt = 0;
 
   constructor(config: OidcConfig) {
     this.config = config;
@@ -24,12 +25,31 @@ export class OidcAuthenticator {
     });
   }
 
+  async checkConnection(): Promise<void> {
+    if (Date.now() - this.checkedAt < 30_000) return;
+    const response = await fetch(this.config.jwksUrl, {
+      redirect: "error",
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!response.ok) throw new Error("OIDC JWKS endpoint is unavailable");
+    const payload: unknown = await response.json();
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      !Array.isArray((payload as { keys?: unknown }).keys) ||
+      (payload as { keys: unknown[] }).keys.length === 0
+    ) {
+      throw new Error("OIDC JWKS endpoint returned no signing keys");
+    }
+    this.checkedAt = Date.now();
+  }
+
   async authenticate(authorization: string | undefined): Promise<AuthenticatedPrincipal> {
-    if (!authorization?.startsWith("Bearer ")) {
+    if (!authorization || !/^Bearer\s+/i.test(authorization)) {
       throw new Error("A bearer token is required");
     }
 
-    const token = authorization.slice("Bearer ".length).trim();
+    const token = authorization.replace(/^Bearer\s+/i, "").trim();
     if (!token || /\s/.test(token)) throw new Error("The bearer token is malformed");
 
     const { payload } = await jwtVerify(token, this.jwks, {

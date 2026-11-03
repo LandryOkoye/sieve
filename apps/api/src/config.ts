@@ -1,10 +1,14 @@
+import type { OidcConfig } from "./auth.js";
+
 export type IntegrationStatus = "available" | "unavailable" | "unverified" | "not_configured";
 
 export type ApiConfig = {
   port: number;
   databaseUrl: string | undefined;
+  auth: OidcConfig | undefined;
   integrations: {
     database: IntegrationStatus;
+    authentication: IntegrationStatus;
     tatum: IntegrationStatus;
     walrusMemory: IntegrationStatus;
   };
@@ -45,11 +49,32 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     }
   }
 
+  const oidcIssuer = environment.AUTH_ISSUER;
+  const oidcAudience = environment.AUTH_AUDIENCE;
+  const oidcJwksUrl = environment.AUTH_JWKS_URL;
+  const hasAnyOidcSetting = Boolean(oidcIssuer || oidcAudience || oidcJwksUrl);
+  const hasAllOidcSettings = Boolean(oidcIssuer && oidcAudience && oidcJwksUrl);
+  if (hasAnyOidcSetting && !hasAllOidcSettings) {
+    throw new Error("AUTH_ISSUER, AUTH_AUDIENCE, and AUTH_JWKS_URL must be configured together");
+  }
+
+  let auth: OidcConfig | undefined;
+  if (hasAllOidcSettings && oidcIssuer && oidcAudience && oidcJwksUrl) {
+    const issuerUrl = new URL(oidcIssuer);
+    const jwksUrl = new URL(oidcJwksUrl);
+    if (issuerUrl.protocol !== "https:" || jwksUrl.protocol !== "https:") {
+      throw new Error("AUTH_ISSUER and AUTH_JWKS_URL must use HTTPS");
+    }
+    auth = { issuer: oidcIssuer, audience: oidcAudience, jwksUrl: jwksUrl.toString() };
+  }
+
   return {
     port: parsePort(environment.API_PORT),
     databaseUrl: environment.DATABASE_URL,
+    auth,
     integrations: {
       database: integrationStatus(Boolean(environment.DATABASE_URL)),
+      authentication: integrationStatus(Boolean(auth)),
       tatum: integrationStatus(Boolean(environment.TATUM_API_KEY)),
       walrusMemory: integrationStatus(
         Boolean(environment.MEMWAL_ACCOUNT_ID && environment.MEMWAL_PRIVATE_KEY),

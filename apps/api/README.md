@@ -13,6 +13,13 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `MEMWAL_PRIVATE_KEY` | Delegate key for the SIEVE API; keep it server-side |
 | `MEMWAL_SERVER_URL` | Optional Walrus Memory relayer URL |
 | `MEMWAL_NAMESPACE` | Optional namespace for SIEVE threat memories |
+| `AUTH_ISSUER` | OIDC issuer URL for API access tokens |
+| `AUTH_AUDIENCE` | Expected audience claim for API access tokens |
+| `AUTH_JWKS_URL` | HTTPS URL for the issuer's signing keys |
+
+All three `AUTH_*` values must be configured together. `GET /api/v1/me` requires
+a valid bearer token and a configured PostgreSQL database, then returns the
+stable SIEVE user ID associated with the token's verified issuer and subject.
 
 The liveness route reports whether the process is running. Readiness applies
 the SQL migrations and checks PostgreSQL when `DATABASE_URL` is configured.

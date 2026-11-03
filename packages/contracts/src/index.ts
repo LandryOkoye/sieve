@@ -33,3 +33,42 @@ export type EvidenceBundle = {
   untrustedText: UntrustedText[];
   warnings: string[];
 };
+
+export type CaseStatus =
+  | "queued"
+  | "fetching_evidence"
+  | "assessing"
+  | "completed"
+  | "failed";
+
+export type ThreatCategory =
+  | "instruction_override"
+  | "trust_manipulation"
+  | "recommendation_steering"
+  | "memory_manipulation";
+
+export type DetectionFinding = {
+  category: ThreatCategory;
+  signal: string;
+  strength: "strong" | "moderate";
+  rationale: string;
+  evidence: EvidencePointer;
+};
+
+export type DetectorVerdict = {
+  outcome: "signals_detected" | "no_signals_detected" | "uncertain";
+  findings: DetectionFinding[];
+  quarantinedText: UntrustedText[];
+};
+
+export type InspectionCase = {
+  id: string;
+  network: SuiNetwork;
+  target: LookupTarget;
+  status: CaseStatus;
+  evidence: EvidenceBundle | null;
+  assessment: DetectorVerdict | null;
+  failureCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};

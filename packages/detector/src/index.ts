@@ -1,24 +1,5 @@
-import type { EvidencePointer, UntrustedText } from "@sieve/contracts";
-
-export type ThreatCategory =
-  | "instruction_override"
-  | "trust_manipulation"
-  | "recommendation_steering"
-  | "memory_manipulation";
-
-export type DetectionFinding = {
-  category: ThreatCategory;
-  signal: string;
-  strength: "strong" | "moderate";
-  rationale: string;
-  evidence: EvidencePointer;
-};
-
-export type DetectorVerdict = {
-  outcome: "signals_detected" | "no_signals_detected";
-  findings: DetectionFinding[];
-  quarantinedText: UntrustedText[];
-};
+import type { DetectionFinding, DetectorVerdict, ThreatCategory, UntrustedText } from "@sieve/contracts";
+export type { DetectionFinding, DetectorVerdict, ThreatCategory } from "@sieve/contracts";
 
 type Rule = {
   category: ThreatCategory;
@@ -59,7 +40,10 @@ const rules: Rule[] = [
   },
 ];
 
-export function detect(textItems: readonly UntrustedText[]): DetectorVerdict {
+export function detect(
+  textItems: readonly UntrustedText[],
+  evidenceCompleteness: "complete" | "partial" = "complete",
+): DetectorVerdict {
   const findings: DetectionFinding[] = [];
 
   for (const item of textItems) {
@@ -76,7 +60,11 @@ export function detect(textItems: readonly UntrustedText[]): DetectorVerdict {
   }
 
   return {
-    outcome: findings.length > 0 ? "signals_detected" : "no_signals_detected",
+    outcome: findings.length > 0
+      ? "signals_detected"
+      : evidenceCompleteness === "complete"
+        ? "no_signals_detected"
+        : "uncertain",
     findings,
     // Chain text remains explicitly untrusted even when no rule matches.
     quarantinedText: [...textItems],

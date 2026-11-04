@@ -161,12 +161,12 @@ export class Database {
     };
   }
 
-  async createEvaluation(userId: string, fixtureSetVersion: string): Promise<EvaluationRun> {
+  async createEvaluation(userId: string, fixtureSetVersion: string, detectorConfig: Record<string, unknown>): Promise<EvaluationRun> {
     const result = await this.pool.query<EvaluationRow>(
       `INSERT INTO evaluation_runs (id, user_id, status, fixture_set_version, detector_config)
        VALUES ($1, $2, 'queued', $3, $4::jsonb)
        RETURNING id, status, fixture_set_version, detector_config, metrics, failure_code, created_at, completed_at`,
-      [randomUUID(), userId, fixtureSetVersion, JSON.stringify({ detectorVersion: "baseline-rules-v1" })],
+      [randomUUID(), userId, fixtureSetVersion, JSON.stringify(detectorConfig)],
     );
     const row = result.rows[0];
     if (!row) throw new Error("Could not create evaluation run");

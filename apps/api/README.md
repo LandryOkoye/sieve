@@ -17,6 +17,8 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `AUTH_AUDIENCE` | Expected audience claim for API access tokens |
 | `AUTH_JWKS_URL` | HTTPS URL for the issuer's signing keys |
 | `METRICS_BEARER_TOKEN` | Optional, at least 32-character token protecting the Prometheus `/metrics` endpoint |
+| `OPENAI_API_KEY` | Optional server-side key for semantic classification of untrusted chain text |
+| `OPENAI_MODEL` | Required with `OPENAI_API_KEY`; model ID supporting Responses API Structured Outputs |
 
 All three `AUTH_*` values must be configured together. `GET /api/v1/me` requires
 a valid bearer token and a configured PostgreSQL database, then returns the
@@ -31,6 +33,19 @@ the SQL migrations and checks PostgreSQL when `DATABASE_URL` is configured.
 Tatum and Walrus are reported as `unverified` until their connection checks are
 wired in; configured values are never reported as a successful connection by
 presence alone.
+
+## Optional semantic judge
+
+The deterministic detector works without an LLM. To enable the semantic judge,
+configure both `OPENAI_API_KEY` and `OPENAI_MODEL`; the API sends bounded,
+extracted chain text to the OpenAI Responses API with strict JSON Schema output,
+no tools, and response storage disabled. The model can add suspicious findings
+but cannot remove deterministic findings, write threat memory, or modify policy.
+The text is explicitly classified as untrusted data. A timeout, refusal,
+malformed response, or unavailable provider produces uncertainty when no rule
+matched, never a clean verdict. Do not configure the integration if chain text
+must not be sent to an external classifier. Evaluation runs record the model ID
+but never the API key.
 
 ## Operational metrics
 

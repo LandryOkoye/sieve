@@ -4,7 +4,7 @@ import { loadConfig } from "./config.js";
 import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
-import { detect } from "@sieve/detector";
+import { detect, judgeUntrustedText } from "@sieve/detector";
 import { baselineFixtureSetVersion, fixtureSetVersions, runEvaluation } from "@sieve/evaluation";
 import type { ChainFact, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
@@ -120,7 +120,9 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         integrations.authentication = "unavailable";
       }
     }
-    const ready = Object.values(integrations).every((status) => status === "available");
+    const ready = Object.entries(integrations)
+      .filter(([name]) => name !== "semanticJudge")
+      .every(([, status]) => status === "available");
     sendJson(response, ready ? 200 : 503, {
       status: ready ? "ready" : "not_ready",
       integrations,
@@ -265,7 +267,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
           sendJson(response, 400, { error: "unsupported_fixture_set" });
           return;
         }
-        const evaluation = await store.createEvaluation(userId, fixtureSetVersion);
+        const evaluation = await store.createEvaluation(userId, fixtureSetVersion, {
+          detectorVersion: "baseline-rules-v2",
+          semanticJudge: config.semanticJudge ? { provider: "openai-responses", model: config.semanticJudge.model } : { enabled: false },
+        });
         sendJson(response, 202, evaluation);
         return;
       }
@@ -444,8 +449,29 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
       warnings.push("Some on-chain text was truncated to enforce evidence size limits.");
     }
     const bundle: EvidenceBundle = { network, target: inspectionCase.target, retrievedAt: new Date().toISOString(), provider: "tatum-sui-grpc", providerMethod, completeness, facts, untrustedText, warnings };
+      let verdict = detect(untrustedText, completeness);
+      if (config.semanticJudge) {
+        try {
+          const judged = await judgeUntrustedText(untrustedText, config.semanticJudge);
+          const findings = [...verdict.findings];
+          for (const finding of judged.findings) {
+            if (!findings.some((existing) => existing.category === finding.category && JSON.stringify(existing.evidence) === JSON.stringify(finding.evidence))) {
+              findings.push(finding);
+            }
+          }
+          verdict = {
+            ...verdict,
+            findings,
+            outcome: findings.length > 0 ? "signals_detected" : judged.complete && completeness === "complete" ? "no_signals_detected" : "uncertain",
+          };
+          if (!judged.complete) bundle.warnings.push("Semantic classification reviewed only bounded text; the assessment remains uncertain unless signals were detected.");
+        } catch {
+          bundle.warnings.push("Semantic classification was unavailable; no rule-only clean result is treated as conclusive.");
+          if (verdict.findings.length === 0) verdict = detect(untrustedText, "partial");
+        }
+      }
     await store.updateCaseStatus(userId, inspectionCase.id, "assessing", bundle);
-    await store.saveAssessment(userId, inspectionCase.id, detect(untrustedText, completeness));
+      await store.saveAssessment(userId, inspectionCase.id, verdict);
   } catch {
     await store.updateCaseStatus(userId, inspectionCase.id, "failed", undefined, "evidence_provider_unavailable");
   } finally {
@@ -482,10 +508,10 @@ async function runQueueWorker(): Promise<void> {
       const evaluation = await store.claimNextEvaluation();
       if (evaluation) {
         try {
-          const metrics = runEvaluation(evaluation.evaluation.fixtureSetVersion);
+          const metrics = await runEvaluation(evaluation.evaluation.fixtureSetVersion, config.semanticJudge);
           await store.completeEvaluation(evaluation.userId, evaluation.evaluation.id, metrics);
         } catch {
-          await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_failed");
+          await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_unavailable");
         }
       }
     }

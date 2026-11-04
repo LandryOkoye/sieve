@@ -45,7 +45,10 @@ The text is explicitly classified as untrusted data. A timeout, refusal,
 malformed response, or unavailable provider produces uncertainty when no rule
 matched, never a clean verdict. Do not configure the integration if chain text
 must not be sent to an external classifier. Evaluation runs record the model ID
-but never the API key.
+but never the API key. A queued run uses the model snapshot recorded when it was
+created; if that model is no longer configured when processing begins, the run
+fails with `evaluation_config_unavailable` rather than silently switching to a
+different detector configuration.
 
 ## Operational metrics
 

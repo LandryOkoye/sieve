@@ -480,6 +480,18 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
   return (await store.getCase(userId, inspectionCase.id))!;
 }
 
+function evaluationJudgeConfig(detectorConfig: Record<string, unknown>) {
+  const stored = detectorConfig.semanticJudge;
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return undefined;
+  const snapshot = stored as Record<string, unknown>;
+  if (snapshot.enabled === false) return undefined;
+  if (typeof snapshot.model !== "string") return undefined;
+  if (!config.semanticJudge || config.semanticJudge.model !== snapshot.model) {
+    throw new Error("evaluation_config_unavailable");
+  }
+  return config.semanticJudge;
+}
+
 const server = createServer((request, response) => {
   response.setHeader("X-Content-Type-Options", "nosniff");
   response.setHeader("X-Frame-Options", "DENY");
@@ -507,8 +519,15 @@ async function runQueueWorker(): Promise<void> {
     } else {
       const evaluation = await store.claimNextEvaluation();
       if (evaluation) {
+        let judgeConfig;
         try {
-          const metrics = await runEvaluation(evaluation.evaluation.fixtureSetVersion, config.semanticJudge);
+          judgeConfig = evaluationJudgeConfig(evaluation.evaluation.detectorConfig);
+        } catch {
+          await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_config_unavailable");
+          return;
+        }
+        try {
+          const metrics = await runEvaluation(evaluation.evaluation.fixtureSetVersion, judgeConfig);
           await store.completeEvaluation(evaluation.userId, evaluation.evaluation.id, metrics);
         } catch {
           await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_unavailable");

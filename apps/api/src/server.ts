@@ -455,6 +455,11 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
 }
 
 const server = createServer((request, response) => {
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
   response.once("finish", () => {
     const method = request.method === "GET" || request.method === "POST" ? request.method : "other";
     const key = `${method}|${metricsRoute(request)}|${response.statusCode}`;

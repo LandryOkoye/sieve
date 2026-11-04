@@ -22,6 +22,10 @@ All three `AUTH_*` values must be configured together. `GET /api/v1/me` requires
 a valid bearer token and a configured PostgreSQL database, then returns the
 stable SIEVE user ID associated with the token's verified issuer and subject.
 
+API responses include no-sniff, no-frame, no-referrer, no-store, and restrictive
+content-security headers. Terminate HTTPS at a trusted deployment boundary;
+the API does not set HSTS because TLS termination belongs to that boundary.
+
 The liveness route reports whether the process is running. Readiness applies
 the SQL migrations and checks PostgreSQL when `DATABASE_URL` is configured.
 Tatum and Walrus are reported as `unverified` until their connection checks are

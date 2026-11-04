@@ -1,13 +1,16 @@
 import { loadConfig } from "../apps/api/src/config.js";
 import {
+  fixtureSetVersions,
   freshValidationV2FixtureSetVersion,
-  runEvaluation,
+  runEvaluationDetailed,
 } from "@sieve/evaluation";
+import type { EvaluationFixtureDiagnostic } from "@sieve/evaluation";
 import type { EvaluationMetrics } from "@sieve/contracts";
 
 type RunResult = {
   run: number;
   metrics: EvaluationMetrics;
+  diagnosticFixtures: EvaluationFixtureDiagnostic[];
 };
 
 const maximumRuns = 10;
@@ -33,11 +36,20 @@ async function main(): Promise<void> {
     throw new Error("semantic_judge_not_configured");
   }
 
+  const fixtureSetVersion = process.env.SIEVE_EVALUATION_FIXTURE_SET || freshValidationV2FixtureSetVersion;
+  if (!fixtureSetVersions.includes(fixtureSetVersion as typeof fixtureSetVersions[number])) {
+    throw new Error("unsupported_fixture_set");
+  }
   const requestedRuns = parseRunCount(process.env.SIEVE_EVALUATION_REPEATS);
   const runs: RunResult[] = [];
   for (let run = 1; run <= requestedRuns; run += 1) {
-    const metrics = await runEvaluation(freshValidationV2FixtureSetVersion, config.semanticJudge);
-    runs.push({ run, metrics });
+    const result = await runEvaluationDetailed(fixtureSetVersion, config.semanticJudge);
+    runs.push({
+      run,
+      metrics: result.metrics,
+      diagnosticFixtures: result.diagnostics.filter(({ outcome, expectedCategoryDetected }) =>
+        outcome === "false_positive" || outcome === "false_negative" || expectedCategoryDetected === false),
+    });
   }
   const passedRuns = runs.filter(({ metrics }) => metrics.acceptance.passed).length;
   const recallRange = numericRange(runs.map(({ metrics }) => metrics.recall));
@@ -45,7 +57,7 @@ async function main(): Promise<void> {
 
   process.stdout.write(`${JSON.stringify({
     evaluatedAt: new Date().toISOString(),
-    fixtureSetVersion: freshValidationV2FixtureSetVersion,
+    fixtureSetVersion,
     provider: config.semanticJudge.provider,
     model: config.semanticJudge.model,
     repeatCount: requestedRuns,
@@ -57,7 +69,10 @@ async function main(): Promise<void> {
   }, null, 2)}\n`);
 }
 
-void main().catch(() => {
-  process.stderr.write("Held-out validation evaluation failed. Check provider configuration and availability.\n");
+void main().catch((error: unknown) => {
+  const errorCode = error instanceof Error && /^[a-z0-9_]+$/.test(error.message)
+    ? error.message
+    : "evaluation_failed";
+  process.stderr.write(`Held-out validation evaluation failed (${errorCode}). Check provider configuration and availability.\n`);
   process.exitCode = 1;
 });

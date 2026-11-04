@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { loadConfig } from "./config.js";
 import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
@@ -12,6 +13,7 @@ const database = config.databaseUrl ? new Database(config.databaseUrl) : undefin
 const authenticator = config.auth ? new OidcAuthenticator(config.auth) : undefined;
 let databaseInitialized = false;
 let queueWorkerBusy = false;
+const requestCounts = new Map<string, number>();
 
 async function ensureDatabase(): Promise<Database> {
   if (!database) throw new Error("Database is not configured");
@@ -29,8 +31,66 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(JSON.stringify(body));
 }
 
+function metricsRoute(request: IncomingMessage): string {
+  const path = new URL(request.url ?? "/", "http://localhost").pathname;
+  if (path === "/api/v1/health/live" || path === "/api/v1/health/ready" || path === "/metrics") return path;
+  if (path === "/api/v1/me") return path;
+  if (path === "/api/v1/cases") return path;
+  if (/^\/api\/v1\/cases\/[0-9a-f-]{36}\/retry$/i.test(path)) return "/api/v1/cases/:id/retry";
+  if (/^\/api\/v1\/cases\/[0-9a-f-]{36}$/i.test(path)) return "/api/v1/cases/:id";
+  if (path === "/api/v1/threat-memories") return path;
+  if (/^\/api\/v1\/threat-memories\/[0-9a-f-]{36}$/i.test(path)) return "/api/v1/threat-memories/:id";
+  if (path === "/api/v1/evaluations") return path;
+  if (/^\/api\/v1\/evaluations\/[0-9a-f-]{36}$/i.test(path)) return "/api/v1/evaluations/:id";
+  return "other";
+}
+
+function authenticatedMetrics(request: IncomingMessage, response: ServerResponse): void {
+  const expected = config.metricsBearerToken;
+  const authorization = request.headers.authorization ?? "";
+  const supplied = authorization.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  const expectedBytes = Buffer.from(expected ?? "");
+  const suppliedBytes = Buffer.from(supplied);
+  if (!expected) {
+    sendJson(response, 404, { error: "not_found" });
+    return;
+  }
+  if (expectedBytes.length !== suppliedBytes.length || !timingSafeEqual(expectedBytes, suppliedBytes)) {
+    sendJson(response, 401, { error: "unauthenticated" });
+    return;
+  }
+
+  const escapeLabel = (value: string) => value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n");
+  const lines = [
+    "# HELP sieve_process_uptime_seconds Process uptime in seconds.",
+    "# TYPE sieve_process_uptime_seconds gauge",
+    `sieve_process_uptime_seconds ${process.uptime()}`,
+    "# HELP sieve_process_resident_memory_bytes Resident memory in bytes.",
+    "# TYPE sieve_process_resident_memory_bytes gauge",
+    `sieve_process_resident_memory_bytes ${process.memoryUsage().rss}`,
+    "# HELP sieve_process_heap_used_bytes JavaScript heap used in bytes.",
+    "# TYPE sieve_process_heap_used_bytes gauge",
+    `sieve_process_heap_used_bytes ${process.memoryUsage().heapUsed}`,
+    "# HELP sieve_queue_worker_busy Whether the single background worker is processing a job.",
+    "# TYPE sieve_queue_worker_busy gauge",
+    `sieve_queue_worker_busy ${queueWorkerBusy ? 1 : 0}`,
+    "# HELP sieve_http_requests_total Completed HTTP requests by method, route, and status.",
+    "# TYPE sieve_http_requests_total counter",
+    ...[...requestCounts.entries()].map(([key, count]) => {
+      const [method, route, status] = key.split("|");
+      return `sieve_http_requests_total{method="${escapeLabel(method ?? "")}",route="${escapeLabel(route ?? "")}",status="${status ?? "0"}"} ${count}`;
+    }),
+  ];
+  response.writeHead(200, { "content-type": "text/plain; version=0.0.4; charset=utf-8", "cache-control": "no-store" });
+  response.end(`${lines.join("\n")}\n`);
+}
+
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
+  if (request.method === "GET" && requestUrl.pathname === "/metrics") {
+    authenticatedMetrics(request, response);
+    return;
+  }
   if (request.method !== "GET" && request.method !== "POST") {
     sendJson(response, 405, { error: "method_not_allowed" });
     return;
@@ -395,6 +455,11 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
 }
 
 const server = createServer((request, response) => {
+  response.once("finish", () => {
+    const method = request.method === "GET" || request.method === "POST" ? request.method : "other";
+    const key = `${method}|${metricsRoute(request)}|${response.statusCode}`;
+    requestCounts.set(key, (requestCounts.get(key) ?? 0) + 1);
+  });
   void handleRequest(request, response).catch(() => {
     sendJson(response, 500, { error: "internal_error" });
   });

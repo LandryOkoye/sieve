@@ -19,6 +19,9 @@ importers:
       '@sieve/detector':
         specifier: workspace:*
         version: link:../../packages/detector
+      '@sieve/evaluation':
+        specifier: workspace:*
+        version: link:../../packages/evaluation
       jose:
         specifier: ^6.2.12
         version: 6.2.15
@@ -69,6 +72,19 @@ importers:
       '@sieve/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/evaluation:
+    dependencies:
+      '@sieve/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@sieve/detector':
+        specifier: workspace:*
+        version: link:../detector
     devDependencies:
       typescript:
         specifier: ^5.7.0

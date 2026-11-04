@@ -34,6 +34,24 @@ Tatum and Walrus are reported as `unverified` until their connection checks are
 wired in; configured values are never reported as a successful connection by
 presence alone.
 
+## Local container deployment
+
+Run `docker compose up --build -d` from the repository root to start PostgreSQL
+and the API. The API is bound to `127.0.0.1:3001` by default, waits for the
+database health check, and has a liveness check. Set optional provider and OIDC
+variables in the shell or an untracked root `.env` file before starting the
+stack. Do not commit that file. The local database password default is for
+development only; use a managed secret and database service for shared or
+production deployments. The API container runs as the unprivileged Node user
+with a read-only root filesystem and dropped Linux capabilities.
+
+Use `docker compose logs -f api` to inspect startup output and
+`docker compose down` to stop the services. PostgreSQL data remains in the
+`sieve-postgres` volume. See the repository backup and restore scripts before
+replacing or deleting that volume. This Compose setup is a local deployment
+baseline; production still needs TLS termination, configured authentication,
+managed backups, and a reviewed release and rollback procedure.
+
 ## Optional semantic judge
 
 The deterministic detector works without an LLM. To enable the semantic judge,

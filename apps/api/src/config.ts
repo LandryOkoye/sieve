@@ -6,6 +6,7 @@ export type ApiConfig = {
   port: number;
   databaseUrl: string | undefined;
   tatumApiKey: string | undefined;
+  metricsBearerToken: string | undefined;
   suiNetwork: "mainnet" | "testnet";
   auth: OidcConfig | undefined;
   integrations: {
@@ -43,6 +44,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     }
   }
 
+  const metricsBearerToken = environment.METRICS_BEARER_TOKEN;
+  if (metricsBearerToken && metricsBearerToken.length < 32) {
+    throw new Error("METRICS_BEARER_TOKEN must contain at least 32 characters when configured");
+  }
+
   const walrusServerUrl = environment.MEMWAL_SERVER_URL;
   if (walrusServerUrl) {
     const parsedWalrusUrl = new URL(walrusServerUrl);
@@ -74,6 +80,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     port: parsePort(environment.API_PORT),
     databaseUrl: environment.DATABASE_URL,
     tatumApiKey: environment.TATUM_API_KEY,
+    metricsBearerToken,
     suiNetwork: network,
     auth,
     integrations: {

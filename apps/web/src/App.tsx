@@ -272,8 +272,6 @@ function App() {
         {page.name === 'settings' && <SettingsPage health={health} />}
         {page.name === 'memory' && <ThreatMemoryPage token={token} onOpenCase={(caseId) => navigate({ name: 'case', caseId })} />}
         {page.name === 'evaluations' && <EvaluationsPage token={token} />}
-        {page.name === 'memory' && <ComingSoonPage type="memory" />}
-        {page.name === 'evaluations' && <ComingSoonPage type="evaluations" />}
         <footer className="page-footer"><span>SIEVE <span className="footer-dot">·</span> Read-only evidence analysis</span><span>Chain text is always treated as untrusted input</span></footer>
       </div>
     </main>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { DetectorVerdict, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
+import type { DetectorVerdict, InspectionCase, SuiNetwork } from '@sieve/contracts'
 import { api, readableApiError, type Health } from './api'
 import './App.css'
 
@@ -255,7 +256,7 @@ function App() {
       <button className="brand-lockup" onClick={() => navigate({ name: 'overview' })} aria-label="SIEVE overview"><span className="brand-mark">S</span><span className="brand-word">SIEVE<span className="brand-period">.</span></span></button>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="main-nav" aria-label="Main navigation">
-        {navItems.map((item) => <button key={item.name} className={`nav-link ${page.name === item.name || (item.name === 'overview' && page.name === 'case') ? 'active' : ''}`} onClick={() => navigate({ name: item.name })}><Icon name={item.icon} /><span>{item.label}</span></button>)}
+        {navItems.map((item) => <button key={item.name} className={`nav-link ${page.name === item.name || (item.name === 'overview' && page.name === 'case') ? 'active' : ''}`} onClick={() => navigate({ name: item.name })}><Icon name={item.icon} /><span>{item.label}</span>{item.name === 'memory' && <span className="nav-soon">SOON</span>}</button>)}
       </nav>
       <div className="sidebar-spacer" />
       <div className="sidebar-note"><div className="sidebar-note-icon"><Icon name="shield" size={17} /></div><div><strong>Built for trust</strong><p>On-chain text stays untrusted by design.</p></div></div>
@@ -272,6 +273,8 @@ function App() {
         {page.name === 'settings' && <SettingsPage health={health} />}
         {page.name === 'memory' && <ThreatMemoryPage token={token} onOpenCase={(caseId) => navigate({ name: 'case', caseId })} />}
         {page.name === 'evaluations' && <EvaluationsPage token={token} />}
+        {page.name === 'memory' && <ComingSoonPage type="memory" />}
+        {page.name === 'evaluations' && <ComingSoonPage type="evaluations" />}
         <footer className="page-footer"><span>SIEVE <span className="footer-dot">·</span> Read-only evidence analysis</span><span>Chain text is always treated as untrusted input</span></footer>
       </div>
     </main>
@@ -557,6 +560,9 @@ function EvaluationResult({ run }: { run: EvaluationRun | null }) {
 
 function ConfusionCell({ label, value, tone }: { label: string; value: number; tone: string }) {
   return <div className={`confusion-cell confusion-${tone}`}><span>{label}</span><strong>{value}</strong></div>
+function ComingSoonPage({ type }: { type: 'memory' | 'evaluations' }) {
+  const memory = type === 'memory'
+  return <section className="coming-page"><div className="coming-icon"><Icon name={memory ? 'memory' : 'chart'} size={24} /></div><p className="eyebrow">{memory ? 'CROSS-SESSION DEFENSE' : 'QUALITY & COVERAGE'}</p><h1>{memory ? 'Threat memory' : 'Evaluations'}</h1><p className="coming-copy">{memory ? 'Review normalized, evidence-backed threat records and see when previous patterns influence a fresh assessment.' : 'Measure detector coverage against versioned attack and benign fixtures, with transparent category-level results.'}</p><div className="coming-status"><span className="status-indicator" /> API capability is not available yet</div><div className="coming-boundary"><Icon name="shield" size={16} /><span>This view will show live API data when the corresponding backend workflow is implemented. No sample records are shown.</span></div></section>
 }
 
 export default App

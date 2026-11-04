@@ -1,4 +1,5 @@
 import type { EvaluationPage, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryPage, ThreatMemoryWrite } from '@sieve/contracts'
+import type { InspectionCase, SuiNetwork } from '@sieve/contracts'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 
@@ -88,6 +89,7 @@ export function readableApiError(error: unknown): string {
   if (error.status === 401) return 'Your session has expired. Connect again with a valid access token.'
   if (error.status === 503 && error.code === 'authentication_not_configured') return 'Authentication is not configured on this API.'
   if (error.status === 503) return 'A required service is unavailable. The operation may still be saved; refresh to check its status.'
+  if (error.status === 503) return 'A required service is unavailable. Your case is saved and can be retried.'
   if (error.code === 'invalid_sui_identifier') return 'That Sui identifier is not valid. Check the value and try again.'
   if (error.code === 'idempotency_key_conflict') return 'This request key was already used for a different inspection.'
   return `Request failed (${error.code}). Please try again.`

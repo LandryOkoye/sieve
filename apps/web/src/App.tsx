@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import type { DetectorVerdict, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
+import type { DetectorVerdict, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
 import { api, readableApiError, type Health } from './api'
 import './App.css'
 
@@ -271,7 +271,7 @@ function App() {
         {page.name === 'case' && <CaseDetail inspectionCase={currentCase?.id === page.caseId ? currentCase : null} loading={!caseError && currentCase?.id !== page.caseId} error={caseError} onBack={() => navigate({ name: 'overview' })} onRetry={retry} />}
         {page.name === 'settings' && <SettingsPage health={health} />}
         {page.name === 'memory' && <ThreatMemoryPage token={token} onOpenCase={(caseId) => navigate({ name: 'case', caseId })} />}
-        {page.name === 'evaluations' && <ComingSoonPage type="evaluations" />}
+        {page.name === 'evaluations' && <EvaluationsPage token={token} />}
         <footer className="page-footer"><span>SIEVE <span className="footer-dot">·</span> Read-only evidence analysis</span><span>Chain text is always treated as untrusted input</span></footer>
       </div>
     </main>
@@ -460,9 +460,101 @@ function SettingsPage({ health }: { health: Health | null }) {
   </>
 }
 
-function ComingSoonPage({ type }: { type: 'memory' | 'evaluations' }) {
-  const memory = type === 'memory'
-  return <section className="coming-page"><div className="coming-icon"><Icon name={memory ? 'memory' : 'chart'} size={24} /></div><p className="eyebrow">{memory ? 'CROSS-SESSION DEFENSE' : 'QUALITY & COVERAGE'}</p><h1>{memory ? 'Threat memory' : 'Evaluations'}</h1><p className="coming-copy">{memory ? 'Review normalized, evidence-backed threat records and see when previous patterns influence a fresh assessment.' : 'Measure detector coverage against versioned attack and benign fixtures, with transparent category-level results.'}</p><div className="coming-status"><span className="status-indicator" /> API capability is not available yet</div><div className="coming-boundary"><Icon name="shield" size={16} /><span>This view will show live API data when the corresponding backend workflow is implemented. No sample records are shown.</span></div></section>
+function EvaluationsPage({ token }: { token: string }) {
+  const [runs, setRuns] = useState<EvaluationRun[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [error, setError] = useState('')
+  const loadedOlder = useRef(false)
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const page = await api.evaluations(token)
+        if (!alive) return
+        setRuns((previous) => {
+          const merged = new Map(previous.map((run) => [run.id, run]))
+          for (const run of page.evaluations) merged.set(run.id, run)
+          return [...merged.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        })
+        if (!loadedOlder.current) setNextCursor(page.nextCursor)
+        setError('')
+      } catch (cause) { if (alive) setError(readableApiError(cause)) } finally { if (alive) setLoading(false) }
+    }
+    void load()
+    const interval = window.setInterval(() => { void load() }, 3000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [token])
+
+  const selected = runs.find((run) => run.id === selectedId) ?? runs[0] ?? null
+
+  async function startEvaluation() {
+    setStarting(true)
+    setError('')
+    try {
+      const run = await api.createEvaluation(token)
+      setRuns((previous) => [run, ...previous.filter((item) => item.id !== run.id)])
+      setSelectedId(run.id)
+    } catch (cause) { setError(readableApiError(cause)) } finally { setStarting(false) }
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = await api.evaluations(token, nextCursor)
+      loadedOlder.current = true
+      setRuns((previous) => {
+        const merged = new Map(previous.map((run) => [run.id, run]))
+        for (const run of page.evaluations) merged.set(run.id, run)
+        return [...merged.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      })
+      setNextCursor(page.nextCursor)
+    } catch (cause) { setError(readableApiError(cause)) } finally { setLoadingMore(false) }
+  }
+
+  return <>
+    <section className="page-heading heading-row"><div><p className="eyebrow">QUALITY & COVERAGE <span>•</span> VERSIONED FIXTURES</p><h1>Evaluations</h1><p className="page-subtitle">Run the baseline detector against a small, versioned fixture set and inspect its measured results.</p></div><button className="button button-primary" onClick={() => void startEvaluation()} disabled={starting}><Icon name="chart" size={16} />{starting ? 'Starting…' : 'Run baseline evaluation'}</button></section>
+    <div className="evaluation-caveat"><Icon name="alert" size={16} /><span>These fixture results are a development baseline, not held-out validation, calibrated confidence, or a safety certification.</span></div>
+    {error && <div className="global-alert" role="alert"><Icon name="alert" size={17} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
+    <div className="evaluation-layout">
+      <section className="panel evaluation-history"><div className="panel-heading"><div><h2>Evaluation runs</h2><p>Persisted results for your workspace</p></div><span className="panel-count">{runs.length} loaded</span></div>
+        {loading ? <div className="table-loading"><span className="spinner" /> Loading evaluation history…</div> : runs.length === 0 ? <div className="empty-state evaluation-empty"><div className="empty-icon"><Icon name="chart" size={22} /></div><h3>No evaluation runs yet</h3><p>Start the baseline fixture set to see detector coverage and false positives.</p><button className="button button-secondary" onClick={() => void startEvaluation()} disabled={starting}>{starting ? 'Starting…' : 'Run baseline evaluation'} <Icon name="arrow" size={14} /></button></div> : <div className="run-list">{runs.map((run) => <button key={run.id} className={`evaluation-run ${selected?.id === run.id ? 'selected-run' : ''}`} onClick={() => setSelectedId(run.id)}><span className={`run-icon run-${run.status}`}><Icon name={run.status === 'failed' ? 'alert' : run.status === 'completed' ? 'chart' : 'clock'} size={15} /></span><span className="run-main"><strong>{run.fixtureSetVersion}</strong><span>{relativeTime(run.createdAt)} · {run.id.slice(0, 8)}</span></span><EvaluationStatus status={run.status} /></button>)}</div>}
+        {nextCursor && !loading && <div className="panel-bottom"><button className="text-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load older runs'} <Icon name="arrow" size={14} /></button></div>}
+      </section>
+      <EvaluationResult run={selected} />
+    </div>
+  </>
+}
+
+function EvaluationStatus({ status }: { status: EvaluationRun['status'] }) {
+  const labels = { queued: 'Queued', running: 'Running', completed: 'Complete', failed: 'Failed' }
+  return <span className={`evaluation-status evaluation-${status}`}><i />{labels[status]}</span>
+}
+
+function formatRate(value: number | null): string {
+  return value === null ? '—' : `${(value * 100).toFixed(1)}%`
+}
+
+function EvaluationResult({ run }: { run: EvaluationRun | null }) {
+  if (!run) return <section className="panel evaluation-result evaluation-result-empty"><div className="empty-icon"><Icon name="chart" size={22} /></div><h2>Select an evaluation run</h2><p>Results will appear here when a run is selected.</p></section>
+  return <section className="panel evaluation-result"><div className="panel-heading"><div><h2>Run results</h2><p>{run.fixtureSetVersion} <span className="footer-dot">·</span> {new Date(run.createdAt).toLocaleString()}</p></div><EvaluationStatus status={run.status} /></div>
+    {run.status === 'queued' || run.status === 'running' ? <div className="run-progress"><span className="spinner" /><div><strong>{run.status === 'queued' ? 'Evaluation queued' : 'Evaluating fixtures'}</strong><p>This panel refreshes while the API processes the run.</p></div></div> : run.status === 'failed' ? <div className="evaluation-failure"><Icon name="alert" size={17} /><div><strong>Evaluation failed</strong><p>{run.failureCode ?? 'The API could not complete this fixture run.'}</p></div></div> : run.metrics ? <>
+      <div className="evaluation-metrics"><Metric label="Precision" value={formatRate(run.metrics.precision)} detail="Among predicted attacks" icon="shield" tone="mint" /><Metric label="Recall" value={formatRate(run.metrics.recall)} detail="Known attacks detected" icon="scan" tone="blue" /><Metric label="False positive rate" value={formatRate(run.metrics.falsePositiveRate)} detail="Benign fixtures flagged" icon="alert" tone="amber" /></div>
+      <div className="fixture-summary"><div><strong>{run.metrics.fixtureCount}</strong><span>fixtures</span></div><div><strong>{run.metrics.attackCount}</strong><span>attack examples</span></div><div><strong>{run.metrics.benignCount}</strong><span>benign examples</span></div></div>
+      <div className="confusion-grid"><ConfusionCell label="True positives" value={run.metrics.truePositives} tone="positive" /><ConfusionCell label="False positives" value={run.metrics.falsePositives} tone="negative" /><ConfusionCell label="True negatives" value={run.metrics.trueNegatives} tone="positive" /><ConfusionCell label="False negatives" value={run.metrics.falseNegatives} tone="negative" /></div>
+      <div className="category-results"><div className="category-heading"><h3>Category coverage</h3><span>Expected attacks detected</span></div>{Object.entries(run.metrics.categories).map(([category, metrics]) => <div className="category-row" key={category}><span>{category.replaceAll('_', ' ')}</span><div className="category-track"><i style={{ width: `${metrics.support ? Math.min(100, metrics.detected / metrics.support * 100) : 0}%` }} /></div><strong>{metrics.detected}/{metrics.support}</strong><em>{metrics.falsePositives ? `${metrics.falsePositives} benign match${metrics.falsePositives === 1 ? '' : 'es'}` : '0 benign matches'}</em></div>)}</div>
+      <p className="evaluation-footnote">Small deterministic fixtures help catch regressions. They do not measure paraphrase coverage or production accuracy.</p>
+    </> : <div className="muted-empty">Metrics are not available for this run.</div>}
+  </section>
+}
+
+function ConfusionCell({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return <div className={`confusion-cell confusion-${tone}`}><span>{label}</span><strong>{value}</strong></div>
 }
 
 export default App

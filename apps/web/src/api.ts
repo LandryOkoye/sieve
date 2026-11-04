@@ -1,4 +1,4 @@
-import type { InspectionCase, SuiNetwork, ThreatMemoryPage, ThreatMemoryWrite } from '@sieve/contracts'
+import type { EvaluationPage, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryPage, ThreatMemoryWrite } from '@sieve/contracts'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 
@@ -69,13 +69,25 @@ export const api = {
   },
   threatMemory: (token: string, memoryId: string) =>
     request<ThreatMemoryWrite>(`/api/v1/threat-memories/${memoryId}`, token),
+  evaluations: (token: string, cursor?: string) => {
+    const query = new URLSearchParams({ limit: '20' })
+    if (cursor) query.set('cursor', cursor)
+    return request<EvaluationPage>(`/api/v1/evaluations?${query}`, token)
+  },
+  evaluation: (token: string, runId: string) =>
+    request<EvaluationRun>(`/api/v1/evaluations/${runId}`, token),
+  createEvaluation: (token: string) =>
+    request<EvaluationRun>('/api/v1/evaluations', token, {
+      method: 'POST',
+      body: JSON.stringify({ fixtureSetVersion: 'sieve-baseline-v1' }),
+    }),
 }
 
 export function readableApiError(error: unknown): string {
   if (!(error instanceof ApiError)) return 'The API could not be reached. Check that the service is running and try again.'
   if (error.status === 401) return 'Your session has expired. Connect again with a valid access token.'
   if (error.status === 503 && error.code === 'authentication_not_configured') return 'Authentication is not configured on this API.'
-  if (error.status === 503) return 'A required service is unavailable. Your case is saved and can be retried.'
+  if (error.status === 503) return 'A required service is unavailable. The operation may still be saved; refresh to check its status.'
   if (error.code === 'invalid_sui_identifier') return 'That Sui identifier is not valid. Check the value and try again.'
   if (error.code === 'idempotency_key_conflict') return 'This request key was already used for a different inspection.'
   return `Request failed (${error.code}). Please try again.`

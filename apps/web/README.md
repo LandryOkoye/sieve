@@ -20,6 +20,7 @@ The current API accepts a bearer token rather than providing a browser sign-in r
 - Sui object and transaction inspection
 - Case status, evidence provenance, findings, chain facts, quarantined text, and retry
 - Read-only threat memory history and normalized record detail
+- Baseline detector evaluations with persisted run history and category metrics
 - Integration health and configuration status
 
-Threat memory creation remains unavailable until the controlled write workflow is implemented. Evaluation runs remain unavailable until the fixture runner is ready. The client does not substitute sample records for live results.
+Threat memory creation remains unavailable until the controlled write workflow is implemented. Evaluation results come from a small baseline fixture set; they are not held-out validation or a safety certification. The client does not substitute sample records for live results.

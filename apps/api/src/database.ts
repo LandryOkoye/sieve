@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import type { DetectorVerdict, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork } from "@sieve/contracts";
+import type { DetectorVerdict, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
 
 const migrationsDirectory = new URL("../../../db/migrations/", import.meta.url);
 
@@ -126,6 +126,36 @@ export class Database {
     return result.rows[0] ? toInspectionCase(result.rows[0]) : null;
   }
 
+  async getThreatMemoryWrite(userId: string, memoryId: string): Promise<ThreatMemoryWrite | null> {
+    const result = await this.pool.query<ThreatMemoryRow>(
+      `${threatMemorySelect} WHERE user_id = $1 AND id = $2`,
+      [userId, memoryId],
+    );
+    return result.rows[0] ? toThreatMemoryWrite(result.rows[0]) : null;
+  }
+
+  async listThreatMemoryWrites(userId: string, limit: number, cursor?: { createdAt: string; id: string }): Promise<{ memories: ThreatMemoryWrite[]; hasMore: boolean; lastCursor: { createdAt: string; id: string } | null }> {
+    const values: unknown[] = [userId];
+    let cursorClause = "";
+    if (cursor) {
+      values.push(cursor.createdAt, cursor.id);
+      cursorClause = " AND (created_at, id) < ($2::timestamptz, $3::text)";
+    }
+    values.push(limit + 1);
+    const result = await this.pool.query<ThreatMemoryRow>(
+      `${threatMemorySelect} WHERE user_id = $1${cursorClause} ORDER BY created_at DESC, id DESC LIMIT $${values.length}`,
+      values,
+    );
+    const hasMore = result.rows.length > limit;
+    const rows = result.rows.slice(0, limit);
+    const last = rows.at(-1);
+    return {
+      memories: rows.map(toThreatMemoryWrite),
+      hasMore,
+      lastCursor: last ? { createdAt: last.cursor_created_at, id: last.id } : null,
+    };
+  }
+
   async listCases(userId: string, limit: number, cursor?: { createdAt: string; id: string }): Promise<{ cases: InspectionCase[]; hasMore: boolean; lastCursor: { createdAt: string; id: string } | null }> {
     const values: unknown[] = [userId];
     let cursorClause = "";
@@ -194,6 +224,38 @@ type CaseRow = {
   id: string; network: SuiNetwork; target_kind: "transaction" | "object"; transaction_digest: string | null; object_id: string | null;
   status: InspectionCase["status"]; evidence: EvidenceBundle | null; failure_code: string | null; created_at: Date; updated_at: Date; assessment: DetectorVerdict | null;
 };
+
+type ThreatMemoryRow = {
+  id: string;
+  case_id: string;
+  pattern: string;
+  status: ThreatMemoryWrite["status"];
+  normalized_record: unknown;
+  walrus_job_id: string | null;
+  blob_id: string | null;
+  failure_code: string | null;
+  created_at: Date;
+  updated_at: Date;
+  cursor_created_at: string;
+};
+
+const threatMemorySelect = `SELECT id, case_id, pattern, status, normalized_record, walrus_job_id, blob_id, failure_code,
+  created_at, created_at::text AS cursor_created_at, updated_at FROM threat_memory_writes`;
+
+function toThreatMemoryWrite(row: ThreatMemoryRow): ThreatMemoryWrite {
+  return {
+    id: row.id,
+    caseId: row.case_id,
+    pattern: row.pattern,
+    status: row.status,
+    normalizedRecord: row.normalized_record,
+    walrusJobId: row.walrus_job_id,
+    blobId: row.blob_id,
+    failureCode: row.failure_code,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
 
 const caseSelect = `SELECT c.id, c.network, c.target_kind, c.transaction_digest, c.object_id, c.status, c.evidence, c.failure_code, c.created_at, c.created_at::text AS cursor_created_at, c.updated_at,
   (SELECT ar.result FROM assessment_revisions ar WHERE ar.case_id = c.id ORDER BY ar.revision DESC LIMIT 1) AS assessment

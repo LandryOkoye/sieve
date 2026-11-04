@@ -72,3 +72,24 @@ export type InspectionCase = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ThreatMemoryWriteStatus = "pending" | "accepted" | "uploaded" | "completed" | "failed";
+
+export type ThreatMemoryWrite = {
+  id: string;
+  caseId: string;
+  pattern: string;
+  status: ThreatMemoryWriteStatus;
+  normalizedRecord: unknown;
+  walrusJobId: string | null;
+  blobId: string | null;
+  failureCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ThreatMemoryPage = {
+  memories: ThreatMemoryWrite[];
+  limit: number;
+  nextCursor: string | null;
+};

@@ -1,4 +1,4 @@
-import type { InspectionCase, SuiNetwork } from '@sieve/contracts'
+import type { InspectionCase, SuiNetwork, ThreatMemoryPage, ThreatMemoryWrite } from '@sieve/contracts'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 
@@ -62,6 +62,13 @@ export const api = {
     }),
   retryCase: (token: string, caseId: string) =>
     request<{ id: string; status: string }>(`/api/v1/cases/${caseId}/retry`, token, { method: 'POST' }),
+  threatMemories: (token: string, cursor?: string) => {
+    const query = new URLSearchParams({ limit: '20' })
+    if (cursor) query.set('cursor', cursor)
+    return request<ThreatMemoryPage>(`/api/v1/threat-memories?${query}`, token)
+  },
+  threatMemory: (token: string, memoryId: string) =>
+    request<ThreatMemoryWrite>(`/api/v1/threat-memories/${memoryId}`, token),
 }
 
 export function readableApiError(error: unknown): string {

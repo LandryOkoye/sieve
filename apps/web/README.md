@@ -19,6 +19,7 @@ The current API accepts a bearer token rather than providing a browser sign-in r
 - Overview and paginated inspection history
 - Sui object and transaction inspection
 - Case status, evidence provenance, findings, chain facts, quarantined text, and retry
+- Read-only threat memory history and normalized record detail
 - Integration health and configuration status
 
-Threat memory and evaluation views remain unavailable until their API workflows are implemented. The client does not substitute sample records for live results.
+Threat memory creation remains unavailable until the controlled write workflow is implemented. Evaluation runs remain unavailable until the fixture runner is ready. The client does not substitute sample records for live results.

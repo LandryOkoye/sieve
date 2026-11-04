@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import type { DetectorVerdict, InspectionCase, SuiNetwork } from '@sieve/contracts'
+import type { DetectorVerdict, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
 import { api, readableApiError, type Health } from './api'
 import './App.css'
 
@@ -255,7 +255,7 @@ function App() {
       <button className="brand-lockup" onClick={() => navigate({ name: 'overview' })} aria-label="SIEVE overview"><span className="brand-mark">S</span><span className="brand-word">SIEVE<span className="brand-period">.</span></span></button>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="main-nav" aria-label="Main navigation">
-        {navItems.map((item) => <button key={item.name} className={`nav-link ${page.name === item.name || (item.name === 'overview' && page.name === 'case') ? 'active' : ''}`} onClick={() => navigate({ name: item.name })}><Icon name={item.icon} /><span>{item.label}</span>{item.name === 'memory' && <span className="nav-soon">SOON</span>}</button>)}
+        {navItems.map((item) => <button key={item.name} className={`nav-link ${page.name === item.name || (item.name === 'overview' && page.name === 'case') ? 'active' : ''}`} onClick={() => navigate({ name: item.name })}><Icon name={item.icon} /><span>{item.label}</span></button>)}
       </nav>
       <div className="sidebar-spacer" />
       <div className="sidebar-note"><div className="sidebar-note-icon"><Icon name="shield" size={17} /></div><div><strong>Built for trust</strong><p>On-chain text stays untrusted by design.</p></div></div>
@@ -270,7 +270,7 @@ function App() {
         {page.name === 'inspect' && <InspectPage onCreated={(record) => { setCases((previous) => [record, ...previous.filter((item) => item.id !== record.id)]); navigate({ name: 'case', caseId: record.id }) }} />}
         {page.name === 'case' && <CaseDetail inspectionCase={currentCase?.id === page.caseId ? currentCase : null} loading={!caseError && currentCase?.id !== page.caseId} error={caseError} onBack={() => navigate({ name: 'overview' })} onRetry={retry} />}
         {page.name === 'settings' && <SettingsPage health={health} />}
-        {page.name === 'memory' && <ComingSoonPage type="memory" />}
+        {page.name === 'memory' && <ThreatMemoryPage token={token} onOpenCase={(caseId) => navigate({ name: 'case', caseId })} />}
         {page.name === 'evaluations' && <ComingSoonPage type="evaluations" />}
         <footer className="page-footer"><span>SIEVE <span className="footer-dot">·</span> Read-only evidence analysis</span><span>Chain text is always treated as untrusted input</span></footer>
       </div>
@@ -373,6 +373,82 @@ function CaseDetail({ inspectionCase, loading, error, onBack, onRetry }: { inspe
 
 function Provenance({ label, value, mono = false, tone }: { label: string; value: string; mono?: boolean; tone?: string }) {
   return <div className="provenance-row"><span>{label}</span><strong className={`${mono ? 'mono' : ''} ${tone ?? ''}`}>{value}</strong></div>
+}
+
+function ThreatMemoryPage({ token, onOpenCase }: { token: string; onOpenCase: (caseId: string) => void }) {
+  const [memories, setMemories] = useState<ThreatMemoryWrite[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [selected, setSelected] = useState<ThreatMemoryWrite | null>(null)
+  const [detail, setDetail] = useState<ThreatMemoryWrite | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const loadedOlder = useRef(false)
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const page = await api.threatMemories(token)
+        if (!alive) return
+        setMemories((previous) => {
+          const combined = new Map(previous.map((item) => [item.id, item]))
+          for (const item of page.memories) combined.set(item.id, item)
+          return [...combined.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        })
+        if (!loadedOlder.current) setNextCursor(page.nextCursor)
+        setError('')
+      } catch (cause) { if (alive) setError(readableApiError(cause)) } finally { if (alive) setLoading(false) }
+    }
+    void load()
+    const interval = window.setInterval(() => { void load() }, 8000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [token])
+
+  const filtered = useMemo(() => memories.filter((memory) => {
+    if (statusFilter !== 'all' && memory.status !== statusFilter) return false
+    const query = search.trim().toLowerCase()
+    if (!query) return true
+    return `${memory.pattern} ${memory.caseId} ${JSON.stringify(memory.normalizedRecord)}`.toLowerCase().includes(query)
+  }), [memories, search, statusFilter])
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = await api.threatMemories(token, nextCursor)
+      loadedOlder.current = true
+      setMemories((previous) => {
+        const combined = new Map(previous.map((item) => [item.id, item]))
+        for (const item of page.memories) combined.set(item.id, item)
+        return [...combined.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      })
+      setNextCursor(page.nextCursor)
+    } catch (cause) { setError(readableApiError(cause)) } finally { setLoadingMore(false) }
+  }
+
+  async function openMemory(memory: ThreatMemoryWrite) {
+    setSelected(memory)
+    setDetail(null)
+    setDetailLoading(true)
+    try { setDetail(await api.threatMemory(token, memory.id)) } catch (cause) { setError(readableApiError(cause)) } finally { setDetailLoading(false) }
+  }
+
+  return <>
+    <section className="page-heading"><p className="eyebrow">CROSS-SESSION DEFENSE <span>•</span> EVIDENCE-BACKED RECORDS</p><h1>Threat memory</h1><p className="page-subtitle">Review normalized threat records and their write status. Memory can raise suspicion, but each case still needs fresh chain evidence.</p></section>
+    {error && <div className="global-alert" role="alert"><Icon name="alert" size={17} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
+    <section className="memory-summary-grid"><Metric label="Records loaded" value={loading ? '—' : memories.length.toString()} detail="Current history pages" icon="memory" tone="mint" /><Metric label="Completed writes" value={loading ? '—' : memories.filter((memory) => memory.status === 'completed').length.toString()} detail="Status recorded by the API" icon="shield" tone="blue" /><Metric label="Needs attention" value={loading ? '—' : memories.filter((memory) => memory.status === 'failed').length.toString()} detail="Failed or incomplete writes" icon="alert" tone="amber" /></section>
+    <section className="panel memory-panel">
+      <div className="panel-heading memory-heading"><div><h2>Memory records</h2><p>Normalized records saved by the controlled assessment workflow</p></div><span className="panel-count">{memories.length} loaded</span></div>
+      <div className="memory-toolbar"><label className="memory-search"><Icon name="grid" size={15} /><span className="sr-only">Search memory records</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search pattern, case, or record" /></label><label className="filter-label">Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="accepted">Accepted</option><option value="uploaded">Uploaded</option><option value="completed">Completed</option><option value="failed">Failed</option></select></label></div>
+      {loading ? <div className="table-loading"><span className="spinner" /> Loading memory history…</div> : memories.length === 0 ? <div className="empty-state"><div className="empty-icon"><Icon name="memory" size={22} /></div><h3>No threat memory records yet</h3><p>Records will appear here when an assessment is approved for memory storage. Raw chain text is not stored as trusted threat knowledge.</p></div> : filtered.length === 0 ? <div className="muted-empty memory-filter-empty">No records match these filters.</div> : <div className="table-scroll"><table className="memory-table"><thead><tr><th>Pattern</th><th>Source case</th><th>Write status</th><th>Created</th><th><span className="sr-only">Details</span></th></tr></thead><tbody>{filtered.map((memory) => <tr key={memory.id} onClick={() => void openMemory(memory)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') void openMemory(memory) }}><td><span className="memory-pattern">{memory.pattern.replaceAll('_', ' ')}</span><span className="memory-id">{memory.id.slice(0, 8)}</span></td><td><button className="case-link" onClick={(event) => { event.stopPropagation(); onOpenCase(memory.caseId) }}>{memory.caseId.slice(0, 8)}… <Icon name="arrow" size={12} /></button></td><td><span className={`memory-status memory-${memory.status}`}><i />{memory.status}</span></td><td className="time-cell">{relativeTime(memory.createdAt)}</td><td><button className="row-arrow" onClick={(event) => { event.stopPropagation(); void openMemory(memory) }} aria-label={`View memory record ${memory.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>}
+      {nextCursor && !loading && <div className="panel-bottom"><button className="text-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load older records'} <Icon name="arrow" size={14} /></button></div>}
+    </section>
+    {selected && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelected(null); setDetail(null) } }}><section className="memory-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-dialog-title"><div className="dialog-heading"><div><p className="eyebrow">STORED THREAT RECORD <span>•</span> UNTRUSTED DATA</p><h2 id="memory-dialog-title">{selected.pattern.replaceAll('_', ' ')}</h2></div><button className="dialog-close" onClick={() => { setSelected(null); setDetail(null) }} aria-label="Close record details">×</button></div>{detailLoading ? <div className="dialog-loading"><span className="spinner" /> Loading record…</div> : <><div className="dialog-meta"><div><span>Status</span><strong className={`memory-status memory-${(detail ?? selected).status}`}><i />{(detail ?? selected).status}</strong></div><div><span>Source case</span><button className="case-link" onClick={() => onOpenCase(selected.caseId)}>{selected.caseId.slice(0, 8)}… <Icon name="arrow" size={12} /></button></div><div><span>Created</span><strong>{new Date((detail ?? selected).createdAt).toLocaleString()}</strong></div>{(detail ?? selected).failureCode && <div><span>Failure code</span><strong>{(detail ?? selected).failureCode}</strong></div>}</div><div className="record-boundary"><Icon name="shield" size={16} /><span>Stored memory is untrusted data. It may inform risk handling but cannot replace evidence from this case.</span></div><h3 className="record-label">Normalized record <span className="untrusted-tag"><Icon name="lock" size={11} /> UNTRUSTED</span></h3><pre className="record-json">{JSON.stringify((detail ?? selected).normalizedRecord, null, 2)}</pre>{(detail ?? selected).blobId && <div className="dialog-meta"><div><span>Walrus blob</span><strong className="mono">{(detail ?? selected).blobId}</strong></div></div>}</>}</section></div>}
+  </>
 }
 
 function SettingsPage({ health }: { health: Health | null }) {

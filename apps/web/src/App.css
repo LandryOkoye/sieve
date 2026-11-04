@@ -337,6 +337,7 @@ button { cursor: pointer; }
 .evaluation-failed { color: #a5584b; background: #fff0ed; }.evaluation-failed i { background: #ca6657; }
 .evaluation-result { min-height: 300px; overflow: hidden; }
 .evaluation-result .panel-heading { border-bottom: 1px solid #eff2ef; }
+.evaluation-result .panel-heading .evaluation-detector-config { margin-top: 4px; color: #728078; font-size: 7px; }
 .evaluation-result-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 30px; text-align: center; }
 .evaluation-result-empty h2 { margin: 10px 0 5px; color: #435249; font-size: 12px; }
 .evaluation-result-empty p { margin: 0; color: #8a958e; font-size: 9px; }

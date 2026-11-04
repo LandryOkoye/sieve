@@ -35,10 +35,26 @@ bash scripts/backup-database.sh ./sieve-backup.dump
 pg_restore --list ./sieve-backup.dump
 ```
 
+For the local Compose database when host client tools are unavailable, explicitly select the container fallback:
+
+```sh
+DATABASE_DOCKER_SERVICE=postgres DATABASE_URL='postgresql://sieve:sieve_local_only@127.0.0.1:5432/sieve' \
+bash scripts/backup-database.sh ./sieve-backup.dump
+```
+
 Restore only into a newly created, empty database. The script checks that the typed confirmation matches the target database name and refuses targets that already contain user relations. It never drops or cleans existing objects:
 
 ```sh
 TARGET_DATABASE_URL='postgresql://…/sieve_restore' \
+RESTORE_CONFIRM_DATABASE='sieve_restore' \
+bash scripts/restore-database.sh ./sieve-backup.dump
+```
+
+The matching local Compose restore fallback is enabled with `TARGET_DATABASE_DOCKER_SERVICE=postgres`; it only accepts localhost port 5432 URLs and verifies the database name against the typed confirmation:
+
+```sh
+TARGET_DATABASE_DOCKER_SERVICE=postgres \
+TARGET_DATABASE_URL='postgresql://sieve:sieve_local_only@127.0.0.1:5432/sieve_restore' \
 RESTORE_CONFIRM_DATABASE='sieve_restore' \
 bash scripts/restore-database.sh ./sieve-backup.dump
 ```

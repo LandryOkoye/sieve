@@ -295,7 +295,7 @@ components:
         completedAt: { type: [string, 'null'], format: date-time }
     EvaluationMetrics:
       type: object
-      required: [fixtureCount, attackCount, benignCount, truePositives, falsePositives, trueNegatives, falseNegatives, precision, recall, falsePositiveRate, categories]
+      required: [fixtureCount, attackCount, benignCount, truePositives, falsePositives, trueNegatives, falseNegatives, precision, recall, falsePositiveRate, categories, thresholds, acceptance]
       properties:
         fixtureCount: { type: integer }
         attackCount: { type: integer }
@@ -316,3 +316,20 @@ components:
               support: { type: integer }
               detected: { type: integer }
               falsePositives: { type: integer }
+        thresholds:
+          type: object
+          required: [minimumOverallRecall, minimumCategoryRecall, maximumFalsePositiveRate]
+          properties:
+            minimumOverallRecall: { type: number }
+            minimumCategoryRecall: { type: number }
+            maximumFalsePositiveRate: { type: number }
+        acceptance:
+          type: object
+          required: [overallRecall, categoryRecall, falsePositiveRate, passed]
+          properties:
+            overallRecall: { type: boolean }
+            categoryRecall:
+              type: object
+              additionalProperties: { type: boolean }
+            falsePositiveRate: { type: boolean }
+            passed: { type: boolean }

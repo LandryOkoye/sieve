@@ -102,6 +102,19 @@ export type EvaluationCategoryMetrics = {
   falsePositives: number;
 };
 
+export type EvaluationAcceptance = {
+  overallRecall: boolean;
+  categoryRecall: Record<ThreatCategory, boolean>;
+  falsePositiveRate: boolean;
+  passed: boolean;
+};
+
+export type EvaluationThresholds = {
+  minimumOverallRecall: number;
+  minimumCategoryRecall: number;
+  maximumFalsePositiveRate: number;
+};
+
 export type EvaluationMetrics = {
   fixtureCount: number;
   attackCount: number;
@@ -114,6 +127,8 @@ export type EvaluationMetrics = {
   recall: number | null;
   falsePositiveRate: number | null;
   categories: Record<ThreatCategory, EvaluationCategoryMetrics>;
+  thresholds: EvaluationThresholds;
+  acceptance: EvaluationAcceptance;
 };
 
 export type EvaluationRun = {

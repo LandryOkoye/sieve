@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import type { DetectorVerdict, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
+import { applyEvaluationThresholds } from "@sieve/evaluation";
 
 const migrationsDirectory = new URL("../../../db/migrations/", import.meta.url);
 
@@ -344,7 +345,7 @@ function toEvaluationRun(row: EvaluationRow): EvaluationRun {
     status: row.status,
     fixtureSetVersion: row.fixture_set_version,
     detectorConfig,
-    metrics: row.metrics,
+    metrics: row.metrics ? applyEvaluationThresholds(row.metrics) : null,
     failureCode: row.failure_code,
     createdAt: row.created_at.toISOString(),
     completedAt: row.completed_at?.toISOString() ?? null,

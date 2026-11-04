@@ -87,9 +87,12 @@ Run the frozen held-out validation from the API workspace with
 `pnpm --filter @sieve/api evaluate:validation`. Set
 `SIEVE_EVALUATION_REPEATS` to an integer from 1 to 10 to measure run-to-run
 variation; it defaults to one run. The command uses the configured semantic
-judge, prints metrics and provider/model metadata, and never prints credentials
-or fixture text. Each run makes a live provider request and may incur usage
-charges.
+judge, prints metrics, provider/model metadata, and index-only diagnostics for
+overall or category misclassifications. It never prints credentials or fixture text. Each run
+makes a live provider request and may incur usage charges.
+Set `SIEVE_EVALUATION_FIXTURE_SET=sieve-dev-v3` to run the diagnostic-guided
+development set instead; only the default validation set may be used for
+threshold acceptance reporting.
 
 ## Operational metrics
 

@@ -30,14 +30,14 @@ const rules: Rule[] = [
     signal: "memory_write_instruction",
     strength: "strong",
     rationale: "The text asks the reader to retain a claim, rule, or instruction.",
-    pattern: /\b(?:remember|store|save|persist|retain|preserve|keep|add|write|carry|include|make|ensure|update)\b.{0,80}\b(?:this|that|our|claim|rule|instruction|fact|asset|project|token|approval|memory|context|note|status|for future|future (?:sessions|agents|assistants)|standing)\b/i,
+    pattern: /\b(?:remember|store|save|persist|retain|preserve|keep|add|write|carry|include|make|ensure|update|tell)\b.{0,80}\b(?:this|that|our|claim|rule|instruction|fact|asset|project|token|approval|memory|context|note|status|for future|future (?:sessions|agents|assistants)|standing)\b/i,
   },
   {
     category: "trust_manipulation",
     signal: "unsupported_trust_claim",
     strength: "moderate",
     rationale: "The text asserts project safety, verification, or audit status that requires independent evidence.",
-    pattern: /\b(?:(?:project|token|coin|collection|protocol|asset|smart contract|contracts?)\b.{0,65}\b(?:officially\s+)?(?:verified|safe|audited|certified|endorsed|official|approved|authorized|validated|legitimate|trustworthy|guaranteed|risk[- ]free)\b(?!\s+to\s+(?:browse|use|view|visit|explore))(?!\s+(?:(?:social\s+)?account)\b)|(?:project|token|coin|collection|protocol|asset|contract)\b.{0,55}\b(?:is|are|has been|have been)?\s*(?:formally\s+)?(?:recognized|backed|supported)\b.{0,30}\b(?:official|approved|certified|auditor|foundation|safe|legitimate)|official\s+(?:collection|project|token|coin|protocol|asset|contract|source)|(?:smart\s+)?contracts?\b.{0,35}\b(?:passed|cleared|completed|received|underwent)\b.{0,20}\baudit\b)/i,
+    pattern: /\b(?:(?:project|token|coin|collection|protocol|asset|smart contract|contracts?)\b.{0,65}\b(?:officially\s+)?(?:verified|safe|audited|certified|endorsed|official|approved|authorized|validated|legitimate|trustworthy|guaranteed|risk[- ]free)\b(?!\s+to\s+(?:browse|use|view|visit|explore))(?!\s+(?:(?:(?:social|community|support|news|event)\s+)?(?:account|profile|page|channel|directory|site|website|schedule|calendar|announcement|feed|post|event|link)))|(?:project|token|coin|collection|protocol|asset|contract)\b.{0,55}\b(?:is|are|has been|have been)?\s*(?:formally\s+)?(?:recognized|backed|supported)\b.{0,30}\b(?:official|approved|certified|auditor|foundation|safe|legitimate)|official\s+(?:collection|project|token|coin|protocol|asset|contract|source)\b(?!\s+(?:(?:social|community|support|news|event)\s+)?(?:account|profile|page|channel|directory|site|website|schedule|calendar|announcement|feed|post|event|link))|(?:smart\s+)?contracts?\b.{0,35}\b(?:passed|cleared|completed|received|underwent)\b.{0,20}\baudit\b)/i,
   },
 ];
 

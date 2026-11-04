@@ -346,6 +346,16 @@ button { cursor: pointer; }
 .evaluation-metrics .metric-label { font-size: 8px; }
 .evaluation-metrics .metric-value { font-size: 20px; }
 .evaluation-metrics .metric-detail { font-size: 7px; }
+.acceptance-panel { display: grid; gap: 9px; margin: 10px 13px 0; padding: 10px; border: 1px solid #ecd9d3; border-radius: 5px; background: #fff8f5; }
+.acceptance-pass { border-color: #d8e8dc; background: #f4faf5; }
+.acceptance-heading { display: flex; align-items: flex-start; gap: 8px; color: #a65e50; }
+.acceptance-pass .acceptance-heading { color: #578064; }
+.acceptance-heading > div { display: grid; gap: 4px; }
+.acceptance-heading strong { font-size: 9px; }
+.acceptance-heading span { color: #87928a; font-size: 7px; line-height: 1.5; }
+.acceptance-checks { display: flex; flex-wrap: wrap; gap: 5px; }
+.acceptance-checks span { padding: 4px 6px; border-radius: 10px; color: #a45a4d; background: #f9e9e4; font-size: 7px; text-transform: capitalize; }
+.acceptance-checks .check-passed { color: #52775b; background: #e5f1e7; }
 .fixture-summary { display: flex; gap: 23px; padding: 12px 15px 11px; border-bottom: 1px solid #edf0ed; }
 .fixture-summary div { display: grid; gap: 3px; }
 .fixture-summary strong { color: #405047; font-family: 'Avenir Next', Avenir, system-ui, sans-serif; font-size: 15px; }

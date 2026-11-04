@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import type { DetectorVerdict, InspectionCase, SuiNetwork } from '@sieve/contracts'
+import type { DetectorVerdict, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
 import { api, readableApiError, type Health } from './api'
 import './App.css'
 
@@ -270,8 +270,8 @@ function App() {
         {page.name === 'inspect' && <InspectPage onCreated={(record) => { setCases((previous) => [record, ...previous.filter((item) => item.id !== record.id)]); navigate({ name: 'case', caseId: record.id }) }} />}
         {page.name === 'case' && <CaseDetail inspectionCase={currentCase?.id === page.caseId ? currentCase : null} loading={!caseError && currentCase?.id !== page.caseId} error={caseError} onBack={() => navigate({ name: 'overview' })} onRetry={retry} />}
         {page.name === 'settings' && <SettingsPage health={health} />}
-        {page.name === 'memory' && <ComingSoonPage type="memory" />}
-        {page.name === 'evaluations' && <ComingSoonPage type="evaluations" />}
+        {page.name === 'memory' && <ThreatMemoryPage token={token} onOpenCase={(caseId) => navigate({ name: 'case', caseId })} />}
+        {page.name === 'evaluations' && <EvaluationsPage token={token} />}
         <footer className="page-footer"><span>SIEVE <span className="footer-dot">·</span> Read-only evidence analysis</span><span>Chain text is always treated as untrusted input</span></footer>
       </div>
     </main>
@@ -375,6 +375,82 @@ function Provenance({ label, value, mono = false, tone }: { label: string; value
   return <div className="provenance-row"><span>{label}</span><strong className={`${mono ? 'mono' : ''} ${tone ?? ''}`}>{value}</strong></div>
 }
 
+function ThreatMemoryPage({ token, onOpenCase }: { token: string; onOpenCase: (caseId: string) => void }) {
+  const [memories, setMemories] = useState<ThreatMemoryWrite[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [error, setError] = useState('')
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [selected, setSelected] = useState<ThreatMemoryWrite | null>(null)
+  const [detail, setDetail] = useState<ThreatMemoryWrite | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const loadedOlder = useRef(false)
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const page = await api.threatMemories(token)
+        if (!alive) return
+        setMemories((previous) => {
+          const combined = new Map(previous.map((item) => [item.id, item]))
+          for (const item of page.memories) combined.set(item.id, item)
+          return [...combined.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        })
+        if (!loadedOlder.current) setNextCursor(page.nextCursor)
+        setError('')
+      } catch (cause) { if (alive) setError(readableApiError(cause)) } finally { if (alive) setLoading(false) }
+    }
+    void load()
+    const interval = window.setInterval(() => { void load() }, 8000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [token])
+
+  const filtered = useMemo(() => memories.filter((memory) => {
+    if (statusFilter !== 'all' && memory.status !== statusFilter) return false
+    const query = search.trim().toLowerCase()
+    if (!query) return true
+    return `${memory.pattern} ${memory.caseId} ${JSON.stringify(memory.normalizedRecord)}`.toLowerCase().includes(query)
+  }), [memories, search, statusFilter])
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = await api.threatMemories(token, nextCursor)
+      loadedOlder.current = true
+      setMemories((previous) => {
+        const combined = new Map(previous.map((item) => [item.id, item]))
+        for (const item of page.memories) combined.set(item.id, item)
+        return [...combined.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      })
+      setNextCursor(page.nextCursor)
+    } catch (cause) { setError(readableApiError(cause)) } finally { setLoadingMore(false) }
+  }
+
+  async function openMemory(memory: ThreatMemoryWrite) {
+    setSelected(memory)
+    setDetail(null)
+    setDetailLoading(true)
+    try { setDetail(await api.threatMemory(token, memory.id)) } catch (cause) { setError(readableApiError(cause)) } finally { setDetailLoading(false) }
+  }
+
+  return <>
+    <section className="page-heading"><p className="eyebrow">CROSS-SESSION DEFENSE <span>•</span> EVIDENCE-BACKED RECORDS</p><h1>Threat memory</h1><p className="page-subtitle">Review normalized threat records and their write status. Memory can raise suspicion, but each case still needs fresh chain evidence.</p></section>
+    {error && <div className="global-alert" role="alert"><Icon name="alert" size={17} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
+    <section className="memory-summary-grid"><Metric label="Records loaded" value={loading ? '—' : memories.length.toString()} detail="Current history pages" icon="memory" tone="mint" /><Metric label="Completed writes" value={loading ? '—' : memories.filter((memory) => memory.status === 'completed').length.toString()} detail="Status recorded by the API" icon="shield" tone="blue" /><Metric label="Needs attention" value={loading ? '—' : memories.filter((memory) => memory.status === 'failed').length.toString()} detail="Failed or incomplete writes" icon="alert" tone="amber" /></section>
+    <section className="panel memory-panel">
+      <div className="panel-heading memory-heading"><div><h2>Memory records</h2><p>Normalized records saved by the controlled assessment workflow</p></div><span className="panel-count">{memories.length} loaded</span></div>
+      <div className="memory-toolbar"><label className="memory-search"><Icon name="grid" size={15} /><span className="sr-only">Search memory records</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search pattern, case, or record" /></label><label className="filter-label">Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="accepted">Accepted</option><option value="uploaded">Uploaded</option><option value="completed">Completed</option><option value="failed">Failed</option></select></label></div>
+      {loading ? <div className="table-loading"><span className="spinner" /> Loading memory history…</div> : memories.length === 0 ? <div className="empty-state"><div className="empty-icon"><Icon name="memory" size={22} /></div><h3>No threat memory records yet</h3><p>Records will appear here when an assessment is approved for memory storage. Raw chain text is not stored as trusted threat knowledge.</p></div> : filtered.length === 0 ? <div className="muted-empty memory-filter-empty">No records match these filters.</div> : <div className="table-scroll"><table className="memory-table"><thead><tr><th>Pattern</th><th>Source case</th><th>Write status</th><th>Created</th><th><span className="sr-only">Details</span></th></tr></thead><tbody>{filtered.map((memory) => <tr key={memory.id} onClick={() => void openMemory(memory)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') void openMemory(memory) }}><td><span className="memory-pattern">{memory.pattern.replaceAll('_', ' ')}</span><span className="memory-id">{memory.id.slice(0, 8)}</span></td><td><button className="case-link" onClick={(event) => { event.stopPropagation(); onOpenCase(memory.caseId) }}>{memory.caseId.slice(0, 8)}… <Icon name="arrow" size={12} /></button></td><td><span className={`memory-status memory-${memory.status}`}><i />{memory.status}</span></td><td className="time-cell">{relativeTime(memory.createdAt)}</td><td><button className="row-arrow" onClick={(event) => { event.stopPropagation(); void openMemory(memory) }} aria-label={`View memory record ${memory.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>}
+      {nextCursor && !loading && <div className="panel-bottom"><button className="text-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load older records'} <Icon name="arrow" size={14} /></button></div>}
+    </section>
+    {selected && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelected(null); setDetail(null) } }}><section className="memory-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-dialog-title"><div className="dialog-heading"><div><p className="eyebrow">STORED THREAT RECORD <span>•</span> UNTRUSTED DATA</p><h2 id="memory-dialog-title">{selected.pattern.replaceAll('_', ' ')}</h2></div><button className="dialog-close" onClick={() => { setSelected(null); setDetail(null) }} aria-label="Close record details">×</button></div>{detailLoading ? <div className="dialog-loading"><span className="spinner" /> Loading record…</div> : <><div className="dialog-meta"><div><span>Status</span><strong className={`memory-status memory-${(detail ?? selected).status}`}><i />{(detail ?? selected).status}</strong></div><div><span>Source case</span><button className="case-link" onClick={() => onOpenCase(selected.caseId)}>{selected.caseId.slice(0, 8)}… <Icon name="arrow" size={12} /></button></div><div><span>Created</span><strong>{new Date((detail ?? selected).createdAt).toLocaleString()}</strong></div>{(detail ?? selected).failureCode && <div><span>Failure code</span><strong>{(detail ?? selected).failureCode}</strong></div>}</div><div className="record-boundary"><Icon name="shield" size={16} /><span>Stored memory is untrusted data. It may inform risk handling but cannot replace evidence from this case.</span></div><h3 className="record-label">Normalized record <span className="untrusted-tag"><Icon name="lock" size={11} /> UNTRUSTED</span></h3><pre className="record-json">{JSON.stringify((detail ?? selected).normalizedRecord, null, 2)}</pre>{(detail ?? selected).blobId && <div className="dialog-meta"><div><span>Walrus blob</span><strong className="mono">{(detail ?? selected).blobId}</strong></div></div>}</>}</section></div>}
+  </>
+}
+
 function SettingsPage({ health }: { health: Health | null }) {
   const names: Record<string, string> = { database: 'PostgreSQL database', authentication: 'Identity provider', tatum: 'Tatum Sui gRPC', walrusMemory: 'Walrus Memory' }
   return <>
@@ -384,9 +460,107 @@ function SettingsPage({ health }: { health: Health | null }) {
   </>
 }
 
-function ComingSoonPage({ type }: { type: 'memory' | 'evaluations' }) {
-  const memory = type === 'memory'
-  return <section className="coming-page"><div className="coming-icon"><Icon name={memory ? 'memory' : 'chart'} size={24} /></div><p className="eyebrow">{memory ? 'CROSS-SESSION DEFENSE' : 'QUALITY & COVERAGE'}</p><h1>{memory ? 'Threat memory' : 'Evaluations'}</h1><p className="coming-copy">{memory ? 'Review normalized, evidence-backed threat records and see when previous patterns influence a fresh assessment.' : 'Measure detector coverage against versioned attack and benign fixtures, with transparent category-level results.'}</p><div className="coming-status"><span className="status-indicator" /> API capability is not available yet</div><div className="coming-boundary"><Icon name="shield" size={16} /><span>This view will show live API data when the corresponding backend workflow is implemented. No sample records are shown.</span></div></section>
+function EvaluationsPage({ token }: { token: string }) {
+  const [fixtureSetVersion, setFixtureSetVersion] = useState('sieve-baseline-v1')
+  const [runs, setRuns] = useState<EvaluationRun[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [error, setError] = useState('')
+  const loadedOlder = useRef(false)
+
+  useEffect(() => {
+    let alive = true
+    const load = async () => {
+      try {
+        const page = await api.evaluations(token)
+        if (!alive) return
+        setRuns((previous) => {
+          const merged = new Map(previous.map((run) => [run.id, run]))
+          for (const run of page.evaluations) merged.set(run.id, run)
+          return [...merged.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        })
+        if (!loadedOlder.current) setNextCursor(page.nextCursor)
+        setError('')
+      } catch (cause) { if (alive) setError(readableApiError(cause)) } finally { if (alive) setLoading(false) }
+    }
+    void load()
+    const interval = window.setInterval(() => { void load() }, 3000)
+    return () => { alive = false; window.clearInterval(interval) }
+  }, [token])
+
+  const selected = runs.find((run) => run.id === selectedId) ?? runs[0] ?? null
+
+  async function startEvaluation() {
+    setStarting(true)
+    setError('')
+    try {
+      const run = await api.createEvaluation(token, fixtureSetVersion)
+      setRuns((previous) => [run, ...previous.filter((item) => item.id !== run.id)])
+      setSelectedId(run.id)
+    } catch (cause) { setError(readableApiError(cause)) } finally { setStarting(false) }
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return
+    setLoadingMore(true)
+    try {
+      const page = await api.evaluations(token, nextCursor)
+      loadedOlder.current = true
+      setRuns((previous) => {
+        const merged = new Map(previous.map((run) => [run.id, run]))
+        for (const run of page.evaluations) merged.set(run.id, run)
+        return [...merged.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      })
+      setNextCursor(page.nextCursor)
+    } catch (cause) { setError(readableApiError(cause)) } finally { setLoadingMore(false) }
+  }
+
+  return <>
+    <section className="page-heading heading-row"><div><p className="eyebrow">QUALITY & COVERAGE <span>•</span> VERSIONED FIXTURES</p><h1>Evaluations</h1><p className="page-subtitle">Run the detector against versioned fixture sets and inspect measured results.</p></div><div className="evaluation-actions"><label className="sr-only" htmlFor="fixture-set">Fixture set</label><select id="fixture-set" value={fixtureSetVersion} onChange={(event) => setFixtureSetVersion(event.target.value)} disabled={starting}><option value="sieve-baseline-v1">Baseline regression</option><option value="sieve-variants-v1">Variant challenge</option><option value="sieve-dev-v1">Development set</option><option value="sieve-validation-v1">Frozen validation set</option></select><button className="button button-primary" onClick={() => void startEvaluation()} disabled={starting}><Icon name="chart" size={16} />{starting ? 'Starting…' : 'Run evaluation'}</button></div></section>
+    <div className="evaluation-caveat"><Icon name="alert" size={16} /><span>Both sets are small, manually authored development fixtures. The held-out variants are separate from the baseline examples, but are not independent external validation, calibrated confidence, or a safety certification.</span></div>
+    {error && <div className="global-alert" role="alert"><Icon name="alert" size={17} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
+    <div className="evaluation-layout">
+      <section className="panel evaluation-history"><div className="panel-heading"><div><h2>Evaluation runs</h2><p>Persisted results for your workspace</p></div><span className="panel-count">{runs.length} loaded</span></div>
+        {loading ? <div className="table-loading"><span className="spinner" /> Loading evaluation history…</div> : runs.length === 0 ? <div className="empty-state evaluation-empty"><div className="empty-icon"><Icon name="chart" size={22} /></div><h3>No evaluation runs yet</h3><p>Choose a fixture set and run it to see detector coverage and false positives.</p><button className="button button-secondary" onClick={() => void startEvaluation()} disabled={starting}>{starting ? 'Starting…' : 'Run evaluation'} <Icon name="arrow" size={14} /></button></div> : <div className="run-list">{runs.map((run) => <button key={run.id} className={`evaluation-run ${selected?.id === run.id ? 'selected-run' : ''}`} onClick={() => setSelectedId(run.id)}><span className={`run-icon run-${run.status}`}><Icon name={run.status === 'failed' ? 'alert' : run.status === 'completed' ? 'chart' : 'clock'} size={15} /></span><span className="run-main"><strong>{run.fixtureSetVersion}</strong><span>{relativeTime(run.createdAt)} · {run.id.slice(0, 8)}</span></span><EvaluationStatus status={run.status} /></button>)}</div>}
+        {nextCursor && !loading && <div className="panel-bottom"><button className="text-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load older runs'} <Icon name="arrow" size={14} /></button></div>}
+      </section>
+      <EvaluationResult run={selected} />
+    </div>
+  </>
 }
+
+function EvaluationStatus({ status }: { status: EvaluationRun['status'] }) {
+  const labels = { queued: 'Queued', running: 'Running', completed: 'Complete', failed: 'Failed' }
+  return <span className={`evaluation-status evaluation-${status}`}><i />{labels[status]}</span>
+}
+
+function formatRate(value: number | null): string {
+  return value === null ? '—' : `${(value * 100).toFixed(1)}%`
+}
+
+function EvaluationResult({ run }: { run: EvaluationRun | null }) {
+  if (!run) return <section className="panel evaluation-result evaluation-result-empty"><div className="empty-icon"><Icon name="chart" size={22} /></div><h2>Select an evaluation run</h2><p>Results will appear here when a run is selected.</p></section>
+  return <section className="panel evaluation-result"><div className="panel-heading"><div><h2>Run results</h2><p>{run.fixtureSetVersion} <span className="footer-dot">·</span> {new Date(run.createdAt).toLocaleString()}</p></div><EvaluationStatus status={run.status} /></div>
+    {run.status === 'queued' || run.status === 'running' ? <div className="run-progress"><span className="spinner" /><div><strong>{run.status === 'queued' ? 'Evaluation queued' : 'Evaluating fixtures'}</strong><p>This panel refreshes while the API processes the run.</p></div></div> : run.status === 'failed' ? <div className="evaluation-failure"><Icon name="alert" size={17} /><div><strong>Evaluation failed</strong><p>{run.failureCode ?? 'The API could not complete this fixture run.'}</p></div></div> : run.metrics ? <>
+      <div className="evaluation-metrics"><Metric label="Precision" value={formatRate(run.metrics.precision)} detail="Among predicted attacks" icon="shield" tone="mint" /><Metric label="Recall" value={formatRate(run.metrics.recall)} detail="Known attacks detected" icon="scan" tone="blue" /><Metric label="False positive rate" value={formatRate(run.metrics.falsePositiveRate)} detail="Benign fixtures flagged" icon="alert" tone="amber" /></div>
+      <div className={`acceptance-panel ${run.metrics.acceptance.passed ? 'acceptance-pass' : 'acceptance-fail'}`} role="status"><div className="acceptance-heading"><Icon name={run.metrics.acceptance.passed ? 'shield' : 'alert'} size={17} /><div><strong>{run.metrics.acceptance.passed ? 'Acceptance targets met' : 'Acceptance targets not met'}</strong><span>Overall recall ≥ {formatRate(run.metrics.thresholds.minimumOverallRecall)} · Each category ≥ {formatRate(run.metrics.thresholds.minimumCategoryRecall)} · False positives ≤ {formatRate(run.metrics.thresholds.maximumFalsePositiveRate)}</span></div></div><div className="acceptance-checks"><span className={run.metrics.acceptance.overallRecall ? 'check-passed' : 'check-failed'}>Overall recall</span>{Object.entries(run.metrics.acceptance.categoryRecall).map(([category, passed]) => <span key={category} className={passed ? 'check-passed' : 'check-failed'}>{category.replaceAll('_', ' ')}</span>)}<span className={run.metrics.acceptance.falsePositiveRate ? 'check-passed' : 'check-failed'}>False positive rate</span></div></div>
+      <div className="fixture-summary"><div><strong>{run.metrics.fixtureCount}</strong><span>fixtures</span></div><div><strong>{run.metrics.attackCount}</strong><span>attack examples</span></div><div><strong>{run.metrics.benignCount}</strong><span>benign examples</span></div></div>
+      <div className="confusion-grid"><ConfusionCell label="True positives" value={run.metrics.truePositives} tone="positive" /><ConfusionCell label="False positives" value={run.metrics.falsePositives} tone="negative" /><ConfusionCell label="True negatives" value={run.metrics.trueNegatives} tone="positive" /><ConfusionCell label="False negatives" value={run.metrics.falseNegatives} tone="negative" /></div>
+      <div className="category-results"><div className="category-heading"><h3>Category coverage</h3><span>Expected attacks detected</span></div>{Object.entries(run.metrics.categories).map(([category, metrics]) => <div className="category-row" key={category}><span>{category.replaceAll('_', ' ')}</span><div className="category-track"><i style={{ width: `${metrics.support ? Math.min(100, metrics.detected / metrics.support * 100) : 0}%` }} /></div><strong>{metrics.detected}/{metrics.support}</strong><em>{metrics.falsePositives ? `${metrics.falsePositives} benign match${metrics.falsePositives === 1 ? '' : 'es'}` : '0 benign matches'}</em></div>)}</div>
+      <p className="evaluation-footnote">Small deterministic fixtures help catch regressions. They do not measure paraphrase coverage or production accuracy.</p>
+    </> : <div className="muted-empty">Metrics are not available for this run.</div>}
+  </section>
+}
+
+function ConfusionCell({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return <div className={`confusion-cell confusion-${tone}`}><span>{label}</span><strong>{value}</strong></div>
+}
+// function ComingSoonPage({ type }: { type: 'memory' | 'evaluations' }) {
+//   const memory = type === 'memory'
+//   return <section className="coming-page"><div className="coming-icon"><Icon name={memory ? 'memory' : 'chart'} size={24} /></div><p className="eyebrow">{memory ? 'CROSS-SESSION DEFENSE' : 'QUALITY & COVERAGE'}</p><h1>{memory ? 'Threat memory' : 'Evaluations'}</h1><p className="coming-copy">{memory ? 'Review normalized, evidence-backed threat records and see when previous patterns influence a fresh assessment.' : 'Measure detector coverage against versioned attack and benign fixtures, with transparent category-level results.'}</p><div className="coming-status"><span className="status-indicator" /> API capability is not available yet</div><div className="coming-boundary"><Icon name="shield" size={16} /><span>This view will show live API data when the corresponding backend workflow is implemented. No sample records are shown.</span></div></section>
+// }
 
 export default App

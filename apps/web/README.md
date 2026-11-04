@@ -19,6 +19,11 @@ The current API accepts a bearer token rather than providing a browser sign-in r
 - Overview and paginated inspection history
 - Sui object and transaction inspection
 - Case status, evidence provenance, findings, chain facts, quarantined text, and retry
+- Read-only threat memory history and normalized record detail
+- Baseline and held-out variant detector evaluations with persisted run history, category metrics, and acceptance-target status
+- Integration health and configuration status
+
+Threat memory creation remains unavailable until the controlled write workflow is implemented. Evaluation targets are at least 97% overall recall, at least 85% recall per category, and at most 10% false positives. Fixture choices distinguish baseline regression, development, variant challenge, and frozen validation runs. The validation examples are stored in the repository and are not independent external validation or a safety certification. The client does not substitute sample records for live results.
 - Integration health and configuration status
 
 Threat memory and evaluation views remain unavailable until their API workflows are implemented. The client does not substitute sample records for live results.

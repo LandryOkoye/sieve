@@ -6,7 +6,7 @@ import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect, judgeUntrustedText } from "@sieve/detector";
 import { baselineFixtureSetVersion, fixtureSetVersions, runEvaluation } from "@sieve/evaluation";
-import type { ChainFact, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
+import type { ChainFact, EvaluationDetectorConfig, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
 const config = loadConfig();
 const database = config.databaseUrl ? new Database(config.databaseUrl) : undefined;
@@ -269,7 +269,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         }
         const evaluation = await store.createEvaluation(userId, fixtureSetVersion, {
           detectorVersion: "baseline-rules-v2",
-          semanticJudge: config.semanticJudge ? { provider: "openai-responses", model: config.semanticJudge.model } : { enabled: false },
+          semanticJudge: config.semanticJudge ? { provider: config.semanticJudge.provider, model: config.semanticJudge.model } : { enabled: false },
         });
         sendJson(response, 202, evaluation);
         return;
@@ -450,7 +450,7 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
     }
     const bundle: EvidenceBundle = { network, target: inspectionCase.target, retrievedAt: new Date().toISOString(), provider: "tatum-sui-grpc", providerMethod, completeness, facts, untrustedText, warnings };
     let verdict = detect(untrustedText, completeness);
-    if (config.semanticJudge) {
+    if (config.semanticJudge && verdict.findings.length === 0) {
       try {
         const judged = await judgeUntrustedText(untrustedText, config.semanticJudge);
         const findings = [...verdict.findings];
@@ -472,7 +472,7 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
     }
     await store.updateCaseStatus(userId, inspectionCase.id, "assessing", bundle);
     const detectorVersion = config.semanticJudge
-      ? `baseline-rules-v2+openai-responses:${config.semanticJudge.model}`
+      ? `baseline-rules-v2+${config.semanticJudge.provider}:${config.semanticJudge.model}`
       : "baseline-rules-v2";
     await store.saveAssessment(userId, inspectionCase.id, verdict, detectorVersion);
   } catch {
@@ -483,13 +483,13 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
   return (await store.getCase(userId, inspectionCase.id))!;
 }
 
-function evaluationJudgeConfig(detectorConfig: Record<string, unknown>) {
+function evaluationJudgeConfig(detectorConfig: EvaluationDetectorConfig) {
   const stored = detectorConfig.semanticJudge;
   if (!stored || typeof stored !== "object" || Array.isArray(stored)) return undefined;
   const snapshot = stored as Record<string, unknown>;
   if (snapshot.enabled === false) return undefined;
   if (typeof snapshot.model !== "string") return undefined;
-  if (!config.semanticJudge || config.semanticJudge.model !== snapshot.model) {
+  if (!config.semanticJudge || config.semanticJudge.provider !== snapshot.provider || config.semanticJudge.model !== snapshot.model) {
     throw new Error("evaluation_config_unavailable");
   }
   return config.semanticJudge;

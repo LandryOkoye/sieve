@@ -16,5 +16,54 @@ services:
       timeout: 3s
       retries: 10
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      API_PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-sieve}:${POSTGRES_PASSWORD:-sieve_local_only}@postgres:5432/${POSTGRES_DB:-sieve}
+      TATUM_API_KEY: ${TATUM_API_KEY:-}
+      TATUM_NETWORK: ${TATUM_NETWORK:-testnet}
+      AUTH_ISSUER: ${AUTH_ISSUER:-}
+      AUTH_AUDIENCE: ${AUTH_AUDIENCE:-}
+      AUTH_JWKS_URL: ${AUTH_JWKS_URL:-}
+      METRICS_BEARER_TOKEN: ${METRICS_BEARER_TOKEN:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+      NVIDIA_MODEL: ${NVIDIA_MODEL:-}
+      SEMANTIC_JUDGE_PROVIDER: ${SEMANTIC_JUDGE_PROVIDER:-}
+      MEMWAL_ACCOUNT_ID: ${MEMWAL_ACCOUNT_ID:-}
+      MEMWAL_PRIVATE_KEY: ${MEMWAL_PRIVATE_KEY:-}
+      MEMWAL_SERVER_URL: ${MEMWAL_SERVER_URL:-}
+      MEMWAL_NAMESPACE: ${MEMWAL_NAMESPACE:-}
+    ports:
+      - "127.0.0.1:${API_PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/v1/health/live').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
 volumes:
   sieve-postgres:

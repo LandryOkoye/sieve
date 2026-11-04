@@ -2,7 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import type { DetectorVerdict, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
+import type { DetectorVerdict, EvaluationDetectorConfig, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
 import { applyEvaluationThresholds } from "@sieve/evaluation";
 
 const migrationsDirectory = new URL("../../../db/migrations/", import.meta.url);
@@ -161,7 +161,7 @@ export class Database {
     };
   }
 
-  async createEvaluation(userId: string, fixtureSetVersion: string, detectorConfig: Record<string, unknown>): Promise<EvaluationRun> {
+  async createEvaluation(userId: string, fixtureSetVersion: string, detectorConfig: EvaluationDetectorConfig): Promise<EvaluationRun> {
     const result = await this.pool.query<EvaluationRow>(
       `INSERT INTO evaluation_runs (id, user_id, status, fixture_set_version, detector_config)
        VALUES ($1, $2, 'queued', $3, $4::jsonb)
@@ -337,9 +337,21 @@ const evaluationSelect = `SELECT id, status, fixture_set_version, detector_confi
   created_at::text AS cursor_created_at, completed_at FROM evaluation_runs`;
 
 function toEvaluationRun(row: EvaluationRow): EvaluationRun {
-  const detectorConfig = row.detector_config && typeof row.detector_config === "object" && !Array.isArray(row.detector_config)
+  const rawConfig = row.detector_config && typeof row.detector_config === "object" && !Array.isArray(row.detector_config)
     ? row.detector_config as Record<string, unknown>
     : {};
+  const rawJudge = rawConfig.semanticJudge && typeof rawConfig.semanticJudge === "object" && !Array.isArray(rawConfig.semanticJudge)
+    ? rawConfig.semanticJudge as Record<string, unknown>
+    : null;
+  const semanticJudge: EvaluationDetectorConfig["semanticJudge"] = rawJudge?.enabled === false
+    ? { enabled: false }
+    : (rawJudge?.provider === "openai-responses" || rawJudge?.provider === "groq-responses" || rawJudge?.provider === "nvidia-nim-chat") && typeof rawJudge.model === "string"
+      ? { provider: rawJudge.provider, model: rawJudge.model }
+      : undefined;
+  const detectorConfig: EvaluationDetectorConfig = {
+    detectorVersion: typeof rawConfig.detectorVersion === "string" ? rawConfig.detectorVersion : "baseline-rules-v1",
+    ...(semanticJudge ? { semanticJudge } : {}),
+  };
   return {
     id: row.id,
     status: row.status,

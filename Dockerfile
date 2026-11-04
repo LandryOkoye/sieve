@@ -16,6 +16,7 @@ RUN pnpm install --frozen-lockfile
 COPY --chown=node:node apps/api ./apps/api
 COPY --chown=node:node packages ./packages
 COPY --chown=node:node db ./db
+COPY --chown=node:node scripts ./scripts
 USER node
 
 EXPOSE 3001

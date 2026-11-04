@@ -72,7 +72,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
   if (configuredProviders > 1 && !configuredProvider) {
     throw new Error("SEMANTIC_JUDGE_PROVIDER is required when multiple judge providers are configured");
   }
-  const judgeProvider = configuredProvider ?? (nvidiaApiKey ? "nvidia" : groqApiKey ? "groq" : judgeApiKey ? "openai" : undefined);
+  const judgeProvider = configuredProvider || (nvidiaApiKey ? "nvidia" : groqApiKey ? "groq" : judgeApiKey ? "openai" : undefined);
   if (judgeProvider === "openai" && (!judgeApiKey || !judgeModel)) {
     throw new Error("OPENAI_API_KEY and OPENAI_MODEL are required for the OpenAI semantic judge");
   }

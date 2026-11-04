@@ -83,6 +83,14 @@ fails with `evaluation_config_unavailable` rather than silently switching to a
 different detector configuration. Assessment revisions record the rules-only
 version or the configured rules-plus-model version for provenance.
 
+Run the frozen held-out validation from the API workspace with
+`pnpm --filter @sieve/api evaluate:validation`. Set
+`SIEVE_EVALUATION_REPEATS` to an integer from 1 to 10 to measure run-to-run
+variation; it defaults to one run. The command uses the configured semantic
+judge, prints metrics and provider/model metadata, and never prints credentials
+or fixture text. Each run makes a live provider request and may incur usage
+charges.
+
 ## Operational metrics
 
 When `METRICS_BEARER_TOKEN` is configured, `GET /metrics` returns Prometheus text metrics for process uptime and memory, background-worker activity, and completed HTTP request counts by bounded route, method, and status. Scrape it with `Authorization: Bearer <token>`. The endpoint returns `404` when metrics are disabled and never emits request query strings, identifiers, or credentials. Keep the token in the deployment's secret store.

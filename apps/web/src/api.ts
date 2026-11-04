@@ -76,10 +76,10 @@ export const api = {
   },
   evaluation: (token: string, runId: string) =>
     request<EvaluationRun>(`/api/v1/evaluations/${runId}`, token),
-  createEvaluation: (token: string) =>
+  createEvaluation: (token: string, fixtureSetVersion = 'sieve-baseline-v1') =>
     request<EvaluationRun>('/api/v1/evaluations', token, {
       method: 'POST',
-      body: JSON.stringify({ fixtureSetVersion: 'sieve-baseline-v1' }),
+      body: JSON.stringify({ fixtureSetVersion }),
     }),
 }
 

@@ -461,6 +461,7 @@ function SettingsPage({ health }: { health: Health | null }) {
 }
 
 function EvaluationsPage({ token }: { token: string }) {
+  const [fixtureSetVersion, setFixtureSetVersion] = useState('sieve-baseline-v1')
   const [runs, setRuns] = useState<EvaluationRun[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState('')
@@ -496,7 +497,7 @@ function EvaluationsPage({ token }: { token: string }) {
     setStarting(true)
     setError('')
     try {
-      const run = await api.createEvaluation(token)
+      const run = await api.createEvaluation(token, fixtureSetVersion)
       setRuns((previous) => [run, ...previous.filter((item) => item.id !== run.id)])
       setSelectedId(run.id)
     } catch (cause) { setError(readableApiError(cause)) } finally { setStarting(false) }
@@ -518,12 +519,12 @@ function EvaluationsPage({ token }: { token: string }) {
   }
 
   return <>
-    <section className="page-heading heading-row"><div><p className="eyebrow">QUALITY & COVERAGE <span>•</span> VERSIONED FIXTURES</p><h1>Evaluations</h1><p className="page-subtitle">Run the baseline detector against a small, versioned fixture set and inspect its measured results.</p></div><button className="button button-primary" onClick={() => void startEvaluation()} disabled={starting}><Icon name="chart" size={16} />{starting ? 'Starting…' : 'Run baseline evaluation'}</button></section>
-    <div className="evaluation-caveat"><Icon name="alert" size={16} /><span>These fixture results are a development baseline, not held-out validation, calibrated confidence, or a safety certification.</span></div>
+    <section className="page-heading heading-row"><div><p className="eyebrow">QUALITY & COVERAGE <span>•</span> VERSIONED FIXTURES</p><h1>Evaluations</h1><p className="page-subtitle">Run the detector against versioned fixture sets and inspect measured results.</p></div><div className="evaluation-actions"><label className="sr-only" htmlFor="fixture-set">Fixture set</label><select id="fixture-set" value={fixtureSetVersion} onChange={(event) => setFixtureSetVersion(event.target.value)} disabled={starting}><option value="sieve-baseline-v1">Baseline set</option><option value="sieve-heldout-v1">Held-out variants</option></select><button className="button button-primary" onClick={() => void startEvaluation()} disabled={starting}><Icon name="chart" size={16} />{starting ? 'Starting…' : 'Run evaluation'}</button></div></section>
+    <div className="evaluation-caveat"><Icon name="alert" size={16} /><span>Both sets are small, manually authored development fixtures. The held-out variants are separate from the baseline examples, but are not independent external validation, calibrated confidence, or a safety certification.</span></div>
     {error && <div className="global-alert" role="alert"><Icon name="alert" size={17} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
     <div className="evaluation-layout">
       <section className="panel evaluation-history"><div className="panel-heading"><div><h2>Evaluation runs</h2><p>Persisted results for your workspace</p></div><span className="panel-count">{runs.length} loaded</span></div>
-        {loading ? <div className="table-loading"><span className="spinner" /> Loading evaluation history…</div> : runs.length === 0 ? <div className="empty-state evaluation-empty"><div className="empty-icon"><Icon name="chart" size={22} /></div><h3>No evaluation runs yet</h3><p>Start the baseline fixture set to see detector coverage and false positives.</p><button className="button button-secondary" onClick={() => void startEvaluation()} disabled={starting}>{starting ? 'Starting…' : 'Run baseline evaluation'} <Icon name="arrow" size={14} /></button></div> : <div className="run-list">{runs.map((run) => <button key={run.id} className={`evaluation-run ${selected?.id === run.id ? 'selected-run' : ''}`} onClick={() => setSelectedId(run.id)}><span className={`run-icon run-${run.status}`}><Icon name={run.status === 'failed' ? 'alert' : run.status === 'completed' ? 'chart' : 'clock'} size={15} /></span><span className="run-main"><strong>{run.fixtureSetVersion}</strong><span>{relativeTime(run.createdAt)} · {run.id.slice(0, 8)}</span></span><EvaluationStatus status={run.status} /></button>)}</div>}
+        {loading ? <div className="table-loading"><span className="spinner" /> Loading evaluation history…</div> : runs.length === 0 ? <div className="empty-state evaluation-empty"><div className="empty-icon"><Icon name="chart" size={22} /></div><h3>No evaluation runs yet</h3><p>Choose a fixture set and run it to see detector coverage and false positives.</p><button className="button button-secondary" onClick={() => void startEvaluation()} disabled={starting}>{starting ? 'Starting…' : 'Run evaluation'} <Icon name="arrow" size={14} /></button></div> : <div className="run-list">{runs.map((run) => <button key={run.id} className={`evaluation-run ${selected?.id === run.id ? 'selected-run' : ''}`} onClick={() => setSelectedId(run.id)}><span className={`run-icon run-${run.status}`}><Icon name={run.status === 'failed' ? 'alert' : run.status === 'completed' ? 'chart' : 'clock'} size={15} /></span><span className="run-main"><strong>{run.fixtureSetVersion}</strong><span>{relativeTime(run.createdAt)} · {run.id.slice(0, 8)}</span></span><EvaluationStatus status={run.status} /></button>)}</div>}
         {nextCursor && !loading && <div className="panel-bottom"><button className="text-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load older runs'} <Icon name="arrow" size={14} /></button></div>}
       </section>
       <EvaluationResult run={selected} />

@@ -4,7 +4,7 @@ import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect } from "@sieve/detector";
-import { baselineFixtureSetVersion, runBaselineEvaluation } from "@sieve/evaluation";
+import { baselineFixtureSetVersion, fixtureSetVersions, runEvaluation } from "@sieve/evaluation";
 import type { ChainFact, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
 const config = loadConfig();
@@ -201,7 +201,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
           return;
         }
         const fixtureSetVersion = body.fixtureSetVersion ?? baselineFixtureSetVersion;
-        if (fixtureSetVersion !== baselineFixtureSetVersion) {
+        if (typeof fixtureSetVersion !== "string" || !fixtureSetVersions.includes(fixtureSetVersion as typeof fixtureSetVersions[number])) {
           sendJson(response, 400, { error: "unsupported_fixture_set" });
           return;
         }
@@ -412,7 +412,7 @@ async function runQueueWorker(): Promise<void> {
       const evaluation = await store.claimNextEvaluation();
       if (evaluation) {
         try {
-          const metrics = runBaselineEvaluation(evaluation.evaluation.fixtureSetVersion);
+          const metrics = runEvaluation(evaluation.evaluation.fixtureSetVersion);
           await store.completeEvaluation(evaluation.userId, evaluation.evaluation.id, metrics);
         } catch {
           await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_failed");

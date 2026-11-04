@@ -6,7 +6,7 @@ import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect, judgeUntrustedText } from "@sieve/detector";
 import { baselineFixtureSetVersion, fixtureSetVersions, runEvaluation } from "@sieve/evaluation";
-import type { ChainFact, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
+import type { ChainFact, EvaluationDetectorConfig, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
 const config = loadConfig();
 const database = config.databaseUrl ? new Database(config.databaseUrl) : undefined;
@@ -450,7 +450,7 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
     }
     const bundle: EvidenceBundle = { network, target: inspectionCase.target, retrievedAt: new Date().toISOString(), provider: "tatum-sui-grpc", providerMethod, completeness, facts, untrustedText, warnings };
     let verdict = detect(untrustedText, completeness);
-    if (config.semanticJudge) {
+    if (config.semanticJudge && verdict.findings.length === 0) {
       try {
         const judged = await judgeUntrustedText(untrustedText, config.semanticJudge);
         const findings = [...verdict.findings];
@@ -483,7 +483,7 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
   return (await store.getCase(userId, inspectionCase.id))!;
 }
 
-function evaluationJudgeConfig(detectorConfig: Record<string, unknown>) {
+function evaluationJudgeConfig(detectorConfig: EvaluationDetectorConfig) {
   const stored = detectorConfig.semanticJudge;
   if (!stored || typeof stored !== "object" || Array.isArray(stored)) return undefined;
   const snapshot = stored as Record<string, unknown>;

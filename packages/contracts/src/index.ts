@@ -96,6 +96,13 @@ export type ThreatMemoryPage = {
 
 export type EvaluationRunStatus = "queued" | "running" | "completed" | "failed";
 
+export type EvaluationDetectorConfig = Record<string, unknown> & {
+  detectorVersion?: string;
+  semanticJudge?:
+    | { enabled: false }
+    | { provider: "openai-responses"; model: string };
+};
+
 export type EvaluationCategoryMetrics = {
   support: number;
   detected: number;
@@ -135,7 +142,7 @@ export type EvaluationRun = {
   id: string;
   status: EvaluationRunStatus;
   fixtureSetVersion: string;
-  detectorConfig: Record<string, unknown>;
+  detectorConfig: EvaluationDetectorConfig;
   metrics: EvaluationMetrics | null;
   failureCode: string | null;
   createdAt: string;

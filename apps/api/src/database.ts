@@ -345,7 +345,7 @@ function toEvaluationRun(row: EvaluationRow): EvaluationRun {
     : null;
   const semanticJudge: EvaluationDetectorConfig["semanticJudge"] = rawJudge?.enabled === false
     ? { enabled: false }
-    : (rawJudge?.provider === "openai-responses" || rawJudge?.provider === "groq-responses") && typeof rawJudge.model === "string"
+    : (rawJudge?.provider === "openai-responses" || rawJudge?.provider === "groq-responses" || rawJudge?.provider === "nvidia-nim-chat") && typeof rawJudge.model === "string"
       ? { provider: rawJudge.provider, model: rawJudge.model }
       : undefined;
   const detectorConfig: EvaluationDetectorConfig = {

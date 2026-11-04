@@ -20,8 +20,10 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `OPENAI_API_KEY` | Optional server-side key for semantic classification of untrusted chain text |
 | `OPENAI_MODEL` | Required with `OPENAI_API_KEY`; model ID supporting Responses API Structured Outputs |
 | `GROQ_API_KEY` | Optional server-side Groq key for the semantic judge |
-| `GROQ_MODEL` | Required with `GROQ_API_KEY`; choose a model that supports strict Structured Outputs |
-| `SEMANTIC_JUDGE_PROVIDER` | Optional `openai` or `groq` selector when both providers are configured |
+| `GROQ_MODEL` | Optional with `GROQ_API_KEY`; defaults to `openai/gpt-oss-20b`, a Groq strict Structured Outputs model |
+| `NVIDIA_API_KEY` | Optional server-side NVIDIA API key for the semantic judge |
+| `NVIDIA_MODEL` | Required with `NVIDIA_API_KEY`; choose a model that supports JSON Schema output |
+| `SEMANTIC_JUDGE_PROVIDER` | Optional `openai`, `groq`, or `nvidia` selector when multiple providers are configured |
 
 All three `AUTH_*` values must be configured together. `GET /api/v1/me` requires
 a valid bearer token and a configured PostgreSQL database, then returns the
@@ -59,12 +61,16 @@ managed backups, and a reviewed release and rollback procedure.
 
 The deterministic detector works without an LLM. To enable the semantic judge,
 configure a provider key and model pair: `OPENAI_API_KEY` with `OPENAI_MODEL`,
-or `GROQ_API_KEY` with `GROQ_MODEL`. When both are configured, select one with
-`SEMANTIC_JUDGE_PROVIDER`. The API sends bounded, extracted chain text to the
-selected Responses API with strict JSON Schema output and no tools. OpenAI
-requests disable response storage; Groq requests omit the unsupported `store`
-parameter. Groq currently documents strict Structured Outputs for models such
-as `openai/gpt-oss-20b` and `openai/gpt-oss-120b`. It runs only when deterministic rules
+`GROQ_API_KEY` with `GROQ_MODEL`, or `NVIDIA_API_KEY` with `NVIDIA_MODEL`.
+When multiple providers are configured, select one with
+`SEMANTIC_JUDGE_PROVIDER`. The API sends bounded, extracted chain text with
+strict JSON Schema output and no tools. OpenAI requests use the Responses API
+and disable response storage; Groq requests use its Responses API and omit the
+unsupported `store` parameter; NVIDIA requests use its Chat Completions API and
+`response_format` JSON Schema. NVIDIA currently documents JSON Schema output
+for models such as `nvidia/nemotron-3.5-super-vl-120b-a12b`. Groq currently
+documents strict Structured Outputs for models such as `openai/gpt-oss-20b` and
+`openai/gpt-oss-120b`. It runs only when deterministic rules
 find no signal. The model can add suspicious findings but cannot remove rule
 findings, write threat memory, or modify policy.
 The text is explicitly classified as untrusted data. A timeout, refusal,

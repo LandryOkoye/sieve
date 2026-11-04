@@ -55,26 +55,32 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
   const judgeApiKey = environment.OPENAI_API_KEY;
   const judgeModel = environment.OPENAI_MODEL;
   const groqApiKey = environment.GROQ_API_KEY;
-  const groqModel = environment.GROQ_MODEL;
+  const groqModel = environment.GROQ_MODEL || (groqApiKey ? "openai/gpt-oss-20b" : undefined);
   const configuredProvider = environment.SEMANTIC_JUDGE_PROVIDER;
-  if (configuredProvider && configuredProvider !== "openai" && configuredProvider !== "groq") {
-    throw new Error("SEMANTIC_JUDGE_PROVIDER must be either openai or groq");
+  if (configuredProvider && !["openai", "groq", "nvidia"].includes(configuredProvider)) {
+    throw new Error("SEMANTIC_JUDGE_PROVIDER must be openai, groq, or nvidia");
   }
   if (Boolean(judgeApiKey) !== Boolean(judgeModel)) {
     throw new Error("OPENAI_API_KEY and OPENAI_MODEL must be configured together");
   }
-  if (Boolean(groqApiKey) !== Boolean(groqModel)) {
-    throw new Error("GROQ_API_KEY and GROQ_MODEL must be configured together");
+  const nvidiaApiKey = environment.NVIDIA_API_KEY;
+  const nvidiaModel = environment.NVIDIA_MODEL;
+  if (Boolean(nvidiaApiKey) !== Boolean(nvidiaModel)) {
+    throw new Error("NVIDIA_API_KEY and NVIDIA_MODEL must be configured together");
   }
-  if (judgeApiKey && groqApiKey && !configuredProvider) {
-    throw new Error("SEMANTIC_JUDGE_PROVIDER is required when both OpenAI and Groq are configured");
+  const configuredProviders = [judgeApiKey, groqApiKey, nvidiaApiKey].filter(Boolean).length;
+  if (configuredProviders > 1 && !configuredProvider) {
+    throw new Error("SEMANTIC_JUDGE_PROVIDER is required when multiple judge providers are configured");
   }
-  const judgeProvider = configuredProvider ?? (groqApiKey ? "groq" : judgeApiKey ? "openai" : undefined);
+  const judgeProvider = configuredProvider ?? (nvidiaApiKey ? "nvidia" : groqApiKey ? "groq" : judgeApiKey ? "openai" : undefined);
   if (judgeProvider === "openai" && (!judgeApiKey || !judgeModel)) {
     throw new Error("OPENAI_API_KEY and OPENAI_MODEL are required for the OpenAI semantic judge");
   }
   if (judgeProvider === "groq" && (!groqApiKey || !groqModel)) {
     throw new Error("GROQ_API_KEY and GROQ_MODEL are required for the Groq semantic judge");
+  }
+  if (judgeProvider === "nvidia" && (!nvidiaApiKey || !nvidiaModel)) {
+    throw new Error("NVIDIA_API_KEY and NVIDIA_MODEL are required for the NVIDIA semantic judge");
   }
   if (judgeModel && (judgeModel.length > 100 || !/^[A-Za-z0-9._:-]+$/.test(judgeModel))) {
     throw new Error("OPENAI_MODEL contains unsupported characters or is too long");
@@ -82,8 +88,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
   if (groqModel && (groqModel.length > 100 || !/^[A-Za-z0-9._:/-]+$/.test(groqModel))) {
     throw new Error("GROQ_MODEL contains unsupported characters or is too long");
   }
+  if (nvidiaModel && (nvidiaModel.length > 100 || !/^[A-Za-z0-9._:/-]+$/.test(nvidiaModel))) {
+    throw new Error("NVIDIA_MODEL contains unsupported characters or is too long");
+  }
   const semanticJudge = judgeProvider === "groq" && groqApiKey && groqModel
     ? { provider: "groq-responses" as const, apiKey: groqApiKey, model: groqModel, baseUrl: "https://api.groq.com/openai/v1" }
+    : judgeProvider === "nvidia" && nvidiaApiKey && nvidiaModel
+      ? { provider: "nvidia-nim-chat" as const, apiKey: nvidiaApiKey, model: nvidiaModel, baseUrl: "https://integrate.api.nvidia.com/v1" }
     : judgeProvider === "openai" && judgeApiKey && judgeModel
       ? { provider: "openai-responses" as const, apiKey: judgeApiKey, model: judgeModel, baseUrl: "https://api.openai.com/v1" }
     : undefined;

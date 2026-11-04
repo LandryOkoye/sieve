@@ -104,7 +104,7 @@ export class Database {
     return result.rowCount === 1;
   }
 
-  async saveAssessment(userId: string, caseId: string, verdict: DetectorVerdict): Promise<void> {
+  async saveAssessment(userId: string, caseId: string, verdict: DetectorVerdict, detectorVersion: string): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -113,8 +113,8 @@ export class Database {
       const revision = await client.query<{ revision: number | null }>("SELECT max(revision) AS revision FROM assessment_revisions WHERE case_id = $1", [caseId]);
       await client.query(
         `INSERT INTO assessment_revisions (id, case_id, revision, detector_version, outcome, result)
-         VALUES ($1, $2, $3, 'baseline-rules-v1', $4, $5::jsonb)`,
-        [randomUUID(), caseId, (revision.rows[0]?.revision ?? 0) + 1, verdict.outcome, JSON.stringify(verdict)],
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [randomUUID(), caseId, (revision.rows[0]?.revision ?? 0) + 1, detectorVersion, verdict.outcome, JSON.stringify(verdict)],
       );
       await client.query("UPDATE inspection_cases SET status = 'completed', updated_at = now() WHERE id = $1", [caseId]);
       await client.query("COMMIT");

@@ -449,29 +449,32 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
       warnings.push("Some on-chain text was truncated to enforce evidence size limits.");
     }
     const bundle: EvidenceBundle = { network, target: inspectionCase.target, retrievedAt: new Date().toISOString(), provider: "tatum-sui-grpc", providerMethod, completeness, facts, untrustedText, warnings };
-      let verdict = detect(untrustedText, completeness);
-      if (config.semanticJudge) {
-        try {
-          const judged = await judgeUntrustedText(untrustedText, config.semanticJudge);
-          const findings = [...verdict.findings];
-          for (const finding of judged.findings) {
-            if (!findings.some((existing) => existing.category === finding.category && JSON.stringify(existing.evidence) === JSON.stringify(finding.evidence))) {
-              findings.push(finding);
-            }
+    let verdict = detect(untrustedText, completeness);
+    if (config.semanticJudge) {
+      try {
+        const judged = await judgeUntrustedText(untrustedText, config.semanticJudge);
+        const findings = [...verdict.findings];
+        for (const finding of judged.findings) {
+          if (!findings.some((existing) => existing.category === finding.category && JSON.stringify(existing.evidence) === JSON.stringify(finding.evidence))) {
+            findings.push(finding);
           }
-          verdict = {
-            ...verdict,
-            findings,
-            outcome: findings.length > 0 ? "signals_detected" : judged.complete && completeness === "complete" ? "no_signals_detected" : "uncertain",
-          };
-          if (!judged.complete) bundle.warnings.push("Semantic classification reviewed only bounded text; the assessment remains uncertain unless signals were detected.");
-        } catch {
-          bundle.warnings.push("Semantic classification was unavailable; no rule-only clean result is treated as conclusive.");
-          if (verdict.findings.length === 0) verdict = detect(untrustedText, "partial");
         }
+        verdict = {
+          ...verdict,
+          findings,
+          outcome: findings.length > 0 ? "signals_detected" : judged.complete && completeness === "complete" ? "no_signals_detected" : "uncertain",
+        };
+        if (!judged.complete) bundle.warnings.push("Semantic classification reviewed only bounded text; the assessment remains uncertain unless signals were detected.");
+      } catch {
+        bundle.warnings.push("Semantic classification was unavailable; no rule-only clean result is treated as conclusive.");
+        if (verdict.findings.length === 0) verdict = detect(untrustedText, "partial");
       }
+    }
     await store.updateCaseStatus(userId, inspectionCase.id, "assessing", bundle);
-      await store.saveAssessment(userId, inspectionCase.id, verdict);
+    const detectorVersion = config.semanticJudge
+      ? `baseline-rules-v2+openai-responses:${config.semanticJudge.model}`
+      : "baseline-rules-v2";
+    await store.saveAssessment(userId, inspectionCase.id, verdict, detectorVersion);
   } catch {
     await store.updateCaseStatus(userId, inspectionCase.id, "failed", undefined, "evidence_provider_unavailable");
   } finally {

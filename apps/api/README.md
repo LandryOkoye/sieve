@@ -48,7 +48,8 @@ must not be sent to an external classifier. Evaluation runs record the model ID
 but never the API key. A queued run uses the model snapshot recorded when it was
 created; if that model is no longer configured when processing begins, the run
 fails with `evaluation_config_unavailable` rather than silently switching to a
-different detector configuration.
+different detector configuration. Assessment revisions record the rules-only
+version or the configured rules-plus-model version for provenance.
 
 ## Operational metrics
 

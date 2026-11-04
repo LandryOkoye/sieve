@@ -54,14 +54,38 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
 
   const judgeApiKey = environment.OPENAI_API_KEY;
   const judgeModel = environment.OPENAI_MODEL;
+  const groqApiKey = environment.GROQ_API_KEY;
+  const groqModel = environment.GROQ_MODEL;
+  const configuredProvider = environment.SEMANTIC_JUDGE_PROVIDER;
+  if (configuredProvider && configuredProvider !== "openai" && configuredProvider !== "groq") {
+    throw new Error("SEMANTIC_JUDGE_PROVIDER must be either openai or groq");
+  }
   if (Boolean(judgeApiKey) !== Boolean(judgeModel)) {
     throw new Error("OPENAI_API_KEY and OPENAI_MODEL must be configured together");
+  }
+  if (Boolean(groqApiKey) !== Boolean(groqModel)) {
+    throw new Error("GROQ_API_KEY and GROQ_MODEL must be configured together");
+  }
+  if (judgeApiKey && groqApiKey && !configuredProvider) {
+    throw new Error("SEMANTIC_JUDGE_PROVIDER is required when both OpenAI and Groq are configured");
+  }
+  const judgeProvider = configuredProvider ?? (groqApiKey ? "groq" : judgeApiKey ? "openai" : undefined);
+  if (judgeProvider === "openai" && (!judgeApiKey || !judgeModel)) {
+    throw new Error("OPENAI_API_KEY and OPENAI_MODEL are required for the OpenAI semantic judge");
+  }
+  if (judgeProvider === "groq" && (!groqApiKey || !groqModel)) {
+    throw new Error("GROQ_API_KEY and GROQ_MODEL are required for the Groq semantic judge");
   }
   if (judgeModel && (judgeModel.length > 100 || !/^[A-Za-z0-9._:-]+$/.test(judgeModel))) {
     throw new Error("OPENAI_MODEL contains unsupported characters or is too long");
   }
-  const semanticJudge = judgeApiKey && judgeModel
-    ? { apiKey: judgeApiKey, model: judgeModel, baseUrl: "https://api.openai.com/v1" }
+  if (groqModel && (groqModel.length > 100 || !/^[A-Za-z0-9._:/-]+$/.test(groqModel))) {
+    throw new Error("GROQ_MODEL contains unsupported characters or is too long");
+  }
+  const semanticJudge = judgeProvider === "groq" && groqApiKey && groqModel
+    ? { provider: "groq-responses" as const, apiKey: groqApiKey, model: groqModel, baseUrl: "https://api.groq.com/openai/v1" }
+    : judgeProvider === "openai" && judgeApiKey && judgeModel
+      ? { provider: "openai-responses" as const, apiKey: judgeApiKey, model: judgeModel, baseUrl: "https://api.openai.com/v1" }
     : undefined;
 
   const walrusServerUrl = environment.MEMWAL_SERVER_URL;

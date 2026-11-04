@@ -19,6 +19,9 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `METRICS_BEARER_TOKEN` | Optional, at least 32-character token protecting the Prometheus `/metrics` endpoint |
 | `OPENAI_API_KEY` | Optional server-side key for semantic classification of untrusted chain text |
 | `OPENAI_MODEL` | Required with `OPENAI_API_KEY`; model ID supporting Responses API Structured Outputs |
+| `GROQ_API_KEY` | Optional server-side Groq key for the semantic judge |
+| `GROQ_MODEL` | Required with `GROQ_API_KEY`; choose a model that supports strict Structured Outputs |
+| `SEMANTIC_JUDGE_PROVIDER` | Optional `openai` or `groq` selector when both providers are configured |
 
 All three `AUTH_*` values must be configured together. `GET /api/v1/me` requires
 a valid bearer token and a configured PostgreSQL database, then returns the
@@ -55,16 +58,20 @@ managed backups, and a reviewed release and rollback procedure.
 ## Optional semantic judge
 
 The deterministic detector works without an LLM. To enable the semantic judge,
-configure both `OPENAI_API_KEY` and `OPENAI_MODEL`; the API sends bounded,
-extracted chain text to the OpenAI Responses API with strict JSON Schema output,
-no tools, and response storage disabled. It runs only when deterministic rules
+configure a provider key and model pair: `OPENAI_API_KEY` with `OPENAI_MODEL`,
+or `GROQ_API_KEY` with `GROQ_MODEL`. When both are configured, select one with
+`SEMANTIC_JUDGE_PROVIDER`. The API sends bounded, extracted chain text to the
+selected Responses API with strict JSON Schema output and no tools. OpenAI
+requests disable response storage; Groq requests omit the unsupported `store`
+parameter. Groq currently documents strict Structured Outputs for models such
+as `openai/gpt-oss-20b` and `openai/gpt-oss-120b`. It runs only when deterministic rules
 find no signal. The model can add suspicious findings but cannot remove rule
 findings, write threat memory, or modify policy.
 The text is explicitly classified as untrusted data. A timeout, refusal,
 malformed response, or unavailable provider produces uncertainty when no rule
 matched, never a clean verdict. Do not configure the integration if chain text
 must not be sent to an external classifier. Evaluation runs record the model ID
-but never the API key. A queued run uses the model snapshot recorded when it was
+but never the API key. A queued run uses the provider and model snapshot recorded when it was
 created; if that model is no longer configured when processing begins, the run
 fails with `evaluation_config_unavailable` rather than silently switching to a
 different detector configuration. Assessment revisions record the rules-only

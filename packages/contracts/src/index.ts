@@ -100,7 +100,7 @@ export type EvaluationDetectorConfig = Record<string, unknown> & {
   detectorVersion?: string;
   semanticJudge?:
     | { enabled: false }
-    | { provider: "openai-responses"; model: string };
+    | { provider: "openai-responses" | "groq-responses"; model: string };
 };
 
 export type EvaluationCategoryMetrics = {

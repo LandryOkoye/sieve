@@ -8,6 +8,7 @@ const categories: readonly ThreatCategory[] = [
 ];
 
 export type SemanticJudgeConfig = {
+  provider: "openai-responses" | "groq-responses";
   apiKey: string;
   model: string;
   baseUrl: string;
@@ -121,7 +122,7 @@ export async function judgeUntrustedText(
     signal: AbortSignal.timeout(15_000),
     body: JSON.stringify({
       model: config.model,
-      store: false,
+      ...(config.provider === "openai-responses" ? { store: false } : {}),
       max_output_tokens: 4_000,
       input: [
         {

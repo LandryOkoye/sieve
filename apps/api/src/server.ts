@@ -269,7 +269,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         }
         const evaluation = await store.createEvaluation(userId, fixtureSetVersion, {
           detectorVersion: "baseline-rules-v2",
-          semanticJudge: config.semanticJudge ? { provider: "openai-responses", model: config.semanticJudge.model } : { enabled: false },
+          semanticJudge: config.semanticJudge ? { provider: config.semanticJudge.provider, model: config.semanticJudge.model } : { enabled: false },
         });
         sendJson(response, 202, evaluation);
         return;
@@ -472,7 +472,7 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
     }
     await store.updateCaseStatus(userId, inspectionCase.id, "assessing", bundle);
     const detectorVersion = config.semanticJudge
-      ? `baseline-rules-v2+openai-responses:${config.semanticJudge.model}`
+      ? `baseline-rules-v2+${config.semanticJudge.provider}:${config.semanticJudge.model}`
       : "baseline-rules-v2";
     await store.saveAssessment(userId, inspectionCase.id, verdict, detectorVersion);
   } catch {
@@ -489,7 +489,7 @@ function evaluationJudgeConfig(detectorConfig: EvaluationDetectorConfig) {
   const snapshot = stored as Record<string, unknown>;
   if (snapshot.enabled === false) return undefined;
   if (typeof snapshot.model !== "string") return undefined;
-  if (!config.semanticJudge || config.semanticJudge.model !== snapshot.model) {
+  if (!config.semanticJudge || config.semanticJudge.provider !== snapshot.provider || config.semanticJudge.model !== snapshot.model) {
     throw new Error("evaluation_config_unavailable");
   }
   return config.semanticJudge;

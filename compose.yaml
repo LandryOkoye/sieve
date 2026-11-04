@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sieve}
+      POSTGRES_USER: ${POSTGRES_USER:-sieve}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sieve_local_only}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - sieve-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sieve} -d ${POSTGRES_DB:-sieve}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sieve-postgres:

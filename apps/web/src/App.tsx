@@ -566,3 +566,4 @@ function ComingSoonPage({ type }: { type: 'memory' | 'evaluations' }) {
 }
 
 export default App
+}

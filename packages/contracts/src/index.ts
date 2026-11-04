@@ -93,3 +93,42 @@ export type ThreatMemoryPage = {
   limit: number;
   nextCursor: string | null;
 };
+
+export type EvaluationRunStatus = "queued" | "running" | "completed" | "failed";
+
+export type EvaluationCategoryMetrics = {
+  support: number;
+  detected: number;
+  falsePositives: number;
+};
+
+export type EvaluationMetrics = {
+  fixtureCount: number;
+  attackCount: number;
+  benignCount: number;
+  truePositives: number;
+  falsePositives: number;
+  trueNegatives: number;
+  falseNegatives: number;
+  precision: number | null;
+  recall: number | null;
+  falsePositiveRate: number | null;
+  categories: Record<ThreatCategory, EvaluationCategoryMetrics>;
+};
+
+export type EvaluationRun = {
+  id: string;
+  status: EvaluationRunStatus;
+  fixtureSetVersion: string;
+  detectorConfig: Record<string, unknown>;
+  metrics: EvaluationMetrics | null;
+  failureCode: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type EvaluationPage = {
+  evaluations: EvaluationRun[];
+  limit: number;
+  nextCursor: string | null;
+};

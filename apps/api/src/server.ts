@@ -4,6 +4,7 @@ import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect } from "@sieve/detector";
+import { baselineFixtureSetVersion, runBaselineEvaluation } from "@sieve/evaluation";
 import type { ChainFact, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
 const config = loadConfig();
@@ -70,7 +71,8 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   const isProtectedRoute =
     (request.method === "GET" && requestUrl.pathname === "/api/v1/me") ||
     requestUrl.pathname.startsWith("/api/v1/cases") ||
-    requestUrl.pathname.startsWith("/api/v1/threat-memories");
+    requestUrl.pathname.startsWith("/api/v1/threat-memories") ||
+    requestUrl.pathname.startsWith("/api/v1/evaluations");
   if (isProtectedRoute) {
     if (!authenticator) {
       sendJson(response, 503, { error: "authentication_not_configured" });
@@ -184,6 +186,46 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       if (request.method === "GET" && memoryMatch) {
         const memory = await store.getThreatMemoryWrite(userId, memoryMatch[1]!);
         sendJson(response, memory ? 200 : 404, memory ?? { error: "threat_memory_not_found" });
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/v1/evaluations") {
+        let body: Record<string, unknown>;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          sendJson(response, 400, { error: "invalid_json_body" });
+          return;
+        }
+        if (Object.keys(body).some((key) => key !== "fixtureSetVersion")) {
+          sendJson(response, 400, { error: "invalid_evaluation_request" });
+          return;
+        }
+        const fixtureSetVersion = body.fixtureSetVersion ?? baselineFixtureSetVersion;
+        if (fixtureSetVersion !== baselineFixtureSetVersion) {
+          sendJson(response, 400, { error: "unsupported_fixture_set" });
+          return;
+        }
+        const evaluation = await store.createEvaluation(userId, fixtureSetVersion);
+        sendJson(response, 202, evaluation);
+        return;
+      }
+      if (request.method === "GET" && requestUrl.pathname === "/api/v1/evaluations") {
+        const limit = parseBoundedInt(requestUrl.searchParams.get("limit"), 20, 1, 100);
+        const cursorParam = requestUrl.searchParams.get("cursor");
+        const cursor = cursorParam ? decodeCursor(cursorParam) : undefined;
+        if (limit === null || (cursorParam && !cursor)) {
+          sendJson(response, 400, { error: "invalid_pagination" });
+          return;
+        }
+        const page = await store.listEvaluations(userId, limit, cursor ?? undefined);
+        const nextCursor = page.hasMore && page.lastCursor ? encodeCursor(page.lastCursor) : null;
+        sendJson(response, 200, { evaluations: page.evaluations, limit, nextCursor });
+        return;
+      }
+      const evaluationMatch = requestUrl.pathname.match(/^\/api\/v1\/evaluations\/([0-9a-f-]{36})$/i);
+      if (request.method === "GET" && evaluationMatch) {
+        const evaluation = await store.getEvaluation(userId, evaluationMatch[1]!);
+        sendJson(response, evaluation ? 200 : 404, evaluation ?? { error: "evaluation_not_found" });
         return;
       }
       sendJson(response, 404, { error: "not_found" });
@@ -364,7 +406,19 @@ async function runQueueWorker(): Promise<void> {
   try {
     const store = await ensureDatabase();
     const claimed = await store.claimNextCase();
-    if (claimed) await processCase(store, claimed.userId, claimed.inspectionCase, claimed.inspectionCase.network);
+    if (claimed) {
+      await processCase(store, claimed.userId, claimed.inspectionCase, claimed.inspectionCase.network);
+    } else {
+      const evaluation = await store.claimNextEvaluation();
+      if (evaluation) {
+        try {
+          const metrics = runBaselineEvaluation(evaluation.evaluation.fixtureSetVersion);
+          await store.completeEvaluation(evaluation.userId, evaluation.evaluation.id, metrics);
+        } catch {
+          await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_failed");
+        }
+      }
+    }
   } catch {
     process.stderr.write("Case queue worker could not process its next item.\n");
   } finally {

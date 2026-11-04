@@ -166,6 +166,65 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ThreatMemoryWrite' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/evaluations:
+    post:
+      summary: Start a fixture-based detector evaluation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [fixtureSetVersion]
+              properties:
+                fixtureSetVersion: { const: sieve-baseline-v1 }
+      responses:
+        '202':
+          description: Evaluation was persisted and queued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationRun' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    get:
+      summary: List the caller's evaluation runs
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string, description: Opaque cursor returned as nextCursor }
+      responses:
+        '200':
+          description: A page of owner-scoped evaluation runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [evaluations, limit, nextCursor]
+                properties:
+                  evaluations:
+                    type: array
+                    items: { $ref: '#/components/schemas/EvaluationRun' }
+                  limit: { type: integer }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/evaluations/{evaluationId}:
+    parameters:
+      - in: path
+        name: evaluationId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Retrieve one owner-scoped evaluation run
+      responses:
+        '200':
+          description: Evaluation status, fixture version, and metrics.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationRun' }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     bearerAuth:
@@ -220,3 +279,38 @@ components:
         failureCode: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    EvaluationRun:
+      type: object
+      required: [id, status, fixtureSetVersion, detectorConfig, metrics, failureCode, createdAt, completedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, completed, failed] }
+        fixtureSetVersion: { type: string }
+        detectorConfig: { type: object }
+        metrics: { oneOf: [{ $ref: '#/components/schemas/EvaluationMetrics' }, { type: 'null' }] }
+        failureCode: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+    EvaluationMetrics:
+      type: object
+      required: [fixtureCount, attackCount, benignCount, truePositives, falsePositives, trueNegatives, falseNegatives, precision, recall, falsePositiveRate, categories]
+      properties:
+        fixtureCount: { type: integer }
+        attackCount: { type: integer }
+        benignCount: { type: integer }
+        truePositives: { type: integer }
+        falsePositives: { type: integer }
+        trueNegatives: { type: integer }
+        falseNegatives: { type: integer }
+        precision: { type: [number, 'null'] }
+        recall: { type: [number, 'null'] }
+        falsePositiveRate: { type: [number, 'null'] }
+        categories:
+          type: object
+          additionalProperties:
+            type: object
+            required: [support, detected, falsePositives]
+            properties:
+              support: { type: integer }
+              detected: { type: integer }
+              falsePositives: { type: integer }

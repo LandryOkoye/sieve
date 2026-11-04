@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { DetectorVerdict, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
-import type { DetectorVerdict, InspectionCase, SuiNetwork } from '@sieve/contracts'
 import { api, readableApiError, type Health } from './api'
 import './App.css'
 
@@ -560,6 +559,7 @@ function EvaluationResult({ run }: { run: EvaluationRun | null }) {
 
 function ConfusionCell({ label, value, tone }: { label: string; value: number; tone: string }) {
   return <div className={`confusion-cell confusion-${tone}`}><span>{label}</span><strong>{value}</strong></div>
+}
 function ComingSoonPage({ type }: { type: 'memory' | 'evaluations' }) {
   const memory = type === 'memory'
   return <section className="coming-page"><div className="coming-icon"><Icon name={memory ? 'memory' : 'chart'} size={24} /></div><p className="eyebrow">{memory ? 'CROSS-SESSION DEFENSE' : 'QUALITY & COVERAGE'}</p><h1>{memory ? 'Threat memory' : 'Evaluations'}</h1><p className="coming-copy">{memory ? 'Review normalized, evidence-backed threat records and see when previous patterns influence a fresh assessment.' : 'Measure detector coverage against versioned attack and benign fixtures, with transparent category-level results.'}</p><div className="coming-status"><span className="status-indicator" /> API capability is not available yet</div><div className="coming-boundary"><Icon name="shield" size={16} /><span>This view will show live API data when the corresponding backend workflow is implemented. No sample records are shown.</span></div></section>

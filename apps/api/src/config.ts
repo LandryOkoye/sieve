@@ -1,4 +1,5 @@
 import type { OidcConfig } from "./auth.js";
+import type { SemanticJudgeConfig } from "@sieve/detector";
 
 export type IntegrationStatus = "available" | "unavailable" | "unverified" | "not_configured";
 
@@ -7,6 +8,7 @@ export type ApiConfig = {
   databaseUrl: string | undefined;
   tatumApiKey: string | undefined;
   metricsBearerToken: string | undefined;
+  semanticJudge: SemanticJudgeConfig | undefined;
   suiNetwork: "mainnet" | "testnet";
   auth: OidcConfig | undefined;
   integrations: {
@@ -14,6 +16,7 @@ export type ApiConfig = {
     authentication: IntegrationStatus;
     tatum: IntegrationStatus;
     walrusMemory: IntegrationStatus;
+    semanticJudge: IntegrationStatus;
   };
 };
 
@@ -49,6 +52,18 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     throw new Error("METRICS_BEARER_TOKEN must contain at least 32 characters when configured");
   }
 
+  const judgeApiKey = environment.OPENAI_API_KEY;
+  const judgeModel = environment.OPENAI_MODEL;
+  if (Boolean(judgeApiKey) !== Boolean(judgeModel)) {
+    throw new Error("OPENAI_API_KEY and OPENAI_MODEL must be configured together");
+  }
+  if (judgeModel && (judgeModel.length > 100 || !/^[A-Za-z0-9._:-]+$/.test(judgeModel))) {
+    throw new Error("OPENAI_MODEL contains unsupported characters or is too long");
+  }
+  const semanticJudge = judgeApiKey && judgeModel
+    ? { apiKey: judgeApiKey, model: judgeModel, baseUrl: "https://api.openai.com/v1" }
+    : undefined;
+
   const walrusServerUrl = environment.MEMWAL_SERVER_URL;
   if (walrusServerUrl) {
     const parsedWalrusUrl = new URL(walrusServerUrl);
@@ -81,6 +96,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     databaseUrl: environment.DATABASE_URL,
     tatumApiKey: environment.TATUM_API_KEY,
     metricsBearerToken,
+    semanticJudge,
     suiNetwork: network,
     auth,
     integrations: {
@@ -90,6 +106,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
       walrusMemory: integrationStatus(
         Boolean(environment.MEMWAL_ACCOUNT_ID && environment.MEMWAL_PRIVATE_KEY),
       ),
+      semanticJudge: integrationStatus(Boolean(semanticJudge)),
     },
   };
 }

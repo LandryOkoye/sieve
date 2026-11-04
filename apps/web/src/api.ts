@@ -1,5 +1,4 @@
 import type { EvaluationPage, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryPage, ThreatMemoryWrite } from '@sieve/contracts'
-import type { InspectionCase, SuiNetwork } from '@sieve/contracts'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 

@@ -126,6 +126,46 @@ paths:
           description: Failed case has been queued for another attempt.
         '404':
           description: The case is not owned by the caller or is not failed.
+  /api/v1/threat-memories:
+    get:
+      summary: List the caller's persisted threat memory writes
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string, description: Opaque cursor returned as nextCursor }
+      responses:
+        '200':
+          description: Owner-scoped memory records and write statuses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [memories, limit, nextCursor]
+                properties:
+                  memories:
+                    type: array
+                    items: { $ref: '#/components/schemas/ThreatMemoryWrite' }
+                  limit: { type: integer }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/threat-memories/{memoryId}:
+    parameters:
+      - in: path
+        name: memoryId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Retrieve one owner-scoped threat memory write
+      responses:
+        '200':
+          description: Stored normalized record and write status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThreatMemoryWrite' }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     bearerAuth:
@@ -163,6 +203,20 @@ components:
           enum: [queued, fetching_evidence, assessing, completed, failed]
         evidence: { type: [object, 'null'] }
         assessment: { type: [object, 'null'] }
+        failureCode: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ThreatMemoryWrite:
+      type: object
+      required: [id, caseId, pattern, status, normalizedRecord, walrusJobId, blobId, failureCode, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        pattern: { type: string }
+        status: { type: string, enum: [pending, accepted, uploaded, completed, failed] }
+        normalizedRecord: { description: Normalized structured threat record }
+        walrusJobId: { type: [string, 'null'] }
+        blobId: { type: [string, 'null'] }
         failureCode: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

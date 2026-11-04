@@ -67,7 +67,11 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
-  if ((request.method === "GET" && requestUrl.pathname === "/api/v1/me") || requestUrl.pathname.startsWith("/api/v1/cases")) {
+  const isProtectedRoute =
+    (request.method === "GET" && requestUrl.pathname === "/api/v1/me") ||
+    requestUrl.pathname.startsWith("/api/v1/cases") ||
+    requestUrl.pathname.startsWith("/api/v1/threat-memories");
+  if (isProtectedRoute) {
     if (!authenticator) {
       sendJson(response, 503, { error: "authentication_not_configured" });
       return;
@@ -161,6 +165,25 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       if (request.method === "GET" && caseMatch) {
         const inspectionCase = await store.getCase(userId, caseMatch[1]!);
         sendJson(response, inspectionCase ? 200 : 404, inspectionCase ?? { error: "case_not_found" });
+        return;
+      }
+      if (request.method === "GET" && requestUrl.pathname === "/api/v1/threat-memories") {
+        const limit = parseBoundedInt(requestUrl.searchParams.get("limit"), 20, 1, 100);
+        const cursorParam = requestUrl.searchParams.get("cursor");
+        const cursor = cursorParam ? decodeCursor(cursorParam) : undefined;
+        if (limit === null || (cursorParam && !cursor)) {
+          sendJson(response, 400, { error: "invalid_pagination" });
+          return;
+        }
+        const page = await store.listThreatMemoryWrites(userId, limit, cursor ?? undefined);
+        const nextCursor = page.hasMore && page.lastCursor ? encodeCursor(page.lastCursor) : null;
+        sendJson(response, 200, { memories: page.memories, limit, nextCursor });
+        return;
+      }
+      const memoryMatch = requestUrl.pathname.match(/^\/api\/v1\/threat-memories\/([0-9a-f-]{36})$/i);
+      if (request.method === "GET" && memoryMatch) {
+        const memory = await store.getThreatMemoryWrite(userId, memoryMatch[1]!);
+        sendJson(response, memory ? 200 : 404, memory ?? { error: "threat_memory_not_found" });
         return;
       }
       sendJson(response, 404, { error: "not_found" });

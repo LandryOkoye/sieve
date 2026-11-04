@@ -1,0 +1,26 @@
+groups:
+  - name: sieve-api
+    rules:
+      - alert: SieveApiUnavailable
+        expr: up{job="sieve-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: SIEVE API metrics endpoint is unavailable
+          description: Prometheus has failed to scrape the protected SIEVE API metrics endpoint for at least two minutes.
+
+      - alert: SieveApiHighServerErrorRate
+        expr: |
+          (
+            sum(rate(sieve_http_requests_total{job="sieve-api",status=~"5.."}[5m]))
+            /
+            clamp_min(sum(rate(sieve_http_requests_total{job="sieve-api"}[5m])), 0.001)
+          ) > 0.05
+          and sum(rate(sieve_http_requests_total{job="sieve-api"}[5m])) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: SIEVE API server error rate is elevated
+          description: More than 5% of API requests failed with a server error for ten minutes at meaningful traffic volume. Adjust this starter threshold to the agreed service target.

@@ -19,6 +19,7 @@
     "@sieve/chain-sui": "workspace:*",
     "@sieve/contracts": "workspace:*",
     "@sieve/detector": "workspace:*",
+    "@sieve/evaluation": "workspace:*",
     "jose": "^6.2.12",
     "pg": "^8.23.1"
   }

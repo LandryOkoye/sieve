@@ -1,9 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { loadConfig } from "./config.js";
 import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect } from "@sieve/detector";
+import { baselineFixtureSetVersion, fixtureSetVersions, runEvaluation } from "@sieve/evaluation";
 import type { ChainFact, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
 const config = loadConfig();
@@ -11,6 +13,7 @@ const database = config.databaseUrl ? new Database(config.databaseUrl) : undefin
 const authenticator = config.auth ? new OidcAuthenticator(config.auth) : undefined;
 let databaseInitialized = false;
 let queueWorkerBusy = false;
+const requestCounts = new Map<string, number>();
 
 async function ensureDatabase(): Promise<Database> {
   if (!database) throw new Error("Database is not configured");
@@ -28,8 +31,66 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(JSON.stringify(body));
 }
 
+function metricsRoute(request: IncomingMessage): string {
+  const path = new URL(request.url ?? "/", "http://localhost").pathname;
+  if (path === "/api/v1/health/live" || path === "/api/v1/health/ready" || path === "/metrics") return path;
+  if (path === "/api/v1/me") return path;
+  if (path === "/api/v1/cases") return path;
+  if (/^\/api\/v1\/cases\/[0-9a-f-]{36}\/retry$/i.test(path)) return "/api/v1/cases/:id/retry";
+  if (/^\/api\/v1\/cases\/[0-9a-f-]{36}$/i.test(path)) return "/api/v1/cases/:id";
+  if (path === "/api/v1/threat-memories") return path;
+  if (/^\/api\/v1\/threat-memories\/[0-9a-f-]{36}$/i.test(path)) return "/api/v1/threat-memories/:id";
+  if (path === "/api/v1/evaluations") return path;
+  if (/^\/api\/v1\/evaluations\/[0-9a-f-]{36}$/i.test(path)) return "/api/v1/evaluations/:id";
+  return "other";
+}
+
+function authenticatedMetrics(request: IncomingMessage, response: ServerResponse): void {
+  const expected = config.metricsBearerToken;
+  const authorization = request.headers.authorization ?? "";
+  const supplied = authorization.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
+  const expectedBytes = Buffer.from(expected ?? "");
+  const suppliedBytes = Buffer.from(supplied);
+  if (!expected) {
+    sendJson(response, 404, { error: "not_found" });
+    return;
+  }
+  if (expectedBytes.length !== suppliedBytes.length || !timingSafeEqual(expectedBytes, suppliedBytes)) {
+    sendJson(response, 401, { error: "unauthenticated" });
+    return;
+  }
+
+  const escapeLabel = (value: string) => value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("\n", "\\n");
+  const lines = [
+    "# HELP sieve_process_uptime_seconds Process uptime in seconds.",
+    "# TYPE sieve_process_uptime_seconds gauge",
+    `sieve_process_uptime_seconds ${process.uptime()}`,
+    "# HELP sieve_process_resident_memory_bytes Resident memory in bytes.",
+    "# TYPE sieve_process_resident_memory_bytes gauge",
+    `sieve_process_resident_memory_bytes ${process.memoryUsage().rss}`,
+    "# HELP sieve_process_heap_used_bytes JavaScript heap used in bytes.",
+    "# TYPE sieve_process_heap_used_bytes gauge",
+    `sieve_process_heap_used_bytes ${process.memoryUsage().heapUsed}`,
+    "# HELP sieve_queue_worker_busy Whether the single background worker is processing a job.",
+    "# TYPE sieve_queue_worker_busy gauge",
+    `sieve_queue_worker_busy ${queueWorkerBusy ? 1 : 0}`,
+    "# HELP sieve_http_requests_total Completed HTTP requests by method, route, and status.",
+    "# TYPE sieve_http_requests_total counter",
+    ...[...requestCounts.entries()].map(([key, count]) => {
+      const [method, route, status] = key.split("|");
+      return `sieve_http_requests_total{method="${escapeLabel(method ?? "")}",route="${escapeLabel(route ?? "")}",status="${status ?? "0"}"} ${count}`;
+    }),
+  ];
+  response.writeHead(200, { "content-type": "text/plain; version=0.0.4; charset=utf-8", "cache-control": "no-store" });
+  response.end(`${lines.join("\n")}\n`);
+}
+
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const requestUrl = new URL(request.url ?? "/", "http://localhost");
+  if (request.method === "GET" && requestUrl.pathname === "/metrics") {
+    authenticatedMetrics(request, response);
+    return;
+  }
   if (request.method !== "GET" && request.method !== "POST") {
     sendJson(response, 405, { error: "method_not_allowed" });
     return;
@@ -67,7 +128,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
-  if ((request.method === "GET" && requestUrl.pathname === "/api/v1/me") || requestUrl.pathname.startsWith("/api/v1/cases")) {
+  const isProtectedRoute =
+    (request.method === "GET" && requestUrl.pathname === "/api/v1/me") ||
+    requestUrl.pathname.startsWith("/api/v1/cases") ||
+    requestUrl.pathname.startsWith("/api/v1/threat-memories") ||
+    requestUrl.pathname.startsWith("/api/v1/evaluations");
+  if (isProtectedRoute) {
     if (!authenticator) {
       sendJson(response, 503, { error: "authentication_not_configured" });
       return;
@@ -161,6 +227,65 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       if (request.method === "GET" && caseMatch) {
         const inspectionCase = await store.getCase(userId, caseMatch[1]!);
         sendJson(response, inspectionCase ? 200 : 404, inspectionCase ?? { error: "case_not_found" });
+        return;
+      }
+      if (request.method === "GET" && requestUrl.pathname === "/api/v1/threat-memories") {
+        const limit = parseBoundedInt(requestUrl.searchParams.get("limit"), 20, 1, 100);
+        const cursorParam = requestUrl.searchParams.get("cursor");
+        const cursor = cursorParam ? decodeCursor(cursorParam) : undefined;
+        if (limit === null || (cursorParam && !cursor)) {
+          sendJson(response, 400, { error: "invalid_pagination" });
+          return;
+        }
+        const page = await store.listThreatMemoryWrites(userId, limit, cursor ?? undefined);
+        const nextCursor = page.hasMore && page.lastCursor ? encodeCursor(page.lastCursor) : null;
+        sendJson(response, 200, { memories: page.memories, limit, nextCursor });
+        return;
+      }
+      const memoryMatch = requestUrl.pathname.match(/^\/api\/v1\/threat-memories\/([0-9a-f-]{36})$/i);
+      if (request.method === "GET" && memoryMatch) {
+        const memory = await store.getThreatMemoryWrite(userId, memoryMatch[1]!);
+        sendJson(response, memory ? 200 : 404, memory ?? { error: "threat_memory_not_found" });
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/v1/evaluations") {
+        let body: Record<string, unknown>;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          sendJson(response, 400, { error: "invalid_json_body" });
+          return;
+        }
+        if (Object.keys(body).some((key) => key !== "fixtureSetVersion")) {
+          sendJson(response, 400, { error: "invalid_evaluation_request" });
+          return;
+        }
+        const fixtureSetVersion = body.fixtureSetVersion ?? baselineFixtureSetVersion;
+        if (typeof fixtureSetVersion !== "string" || !fixtureSetVersions.includes(fixtureSetVersion as typeof fixtureSetVersions[number])) {
+          sendJson(response, 400, { error: "unsupported_fixture_set" });
+          return;
+        }
+        const evaluation = await store.createEvaluation(userId, fixtureSetVersion);
+        sendJson(response, 202, evaluation);
+        return;
+      }
+      if (request.method === "GET" && requestUrl.pathname === "/api/v1/evaluations") {
+        const limit = parseBoundedInt(requestUrl.searchParams.get("limit"), 20, 1, 100);
+        const cursorParam = requestUrl.searchParams.get("cursor");
+        const cursor = cursorParam ? decodeCursor(cursorParam) : undefined;
+        if (limit === null || (cursorParam && !cursor)) {
+          sendJson(response, 400, { error: "invalid_pagination" });
+          return;
+        }
+        const page = await store.listEvaluations(userId, limit, cursor ?? undefined);
+        const nextCursor = page.hasMore && page.lastCursor ? encodeCursor(page.lastCursor) : null;
+        sendJson(response, 200, { evaluations: page.evaluations, limit, nextCursor });
+        return;
+      }
+      const evaluationMatch = requestUrl.pathname.match(/^\/api\/v1\/evaluations\/([0-9a-f-]{36})$/i);
+      if (request.method === "GET" && evaluationMatch) {
+        const evaluation = await store.getEvaluation(userId, evaluationMatch[1]!);
+        sendJson(response, evaluation ? 200 : 404, evaluation ?? { error: "evaluation_not_found" });
         return;
       }
       sendJson(response, 404, { error: "not_found" });
@@ -330,6 +455,16 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
 }
 
 const server = createServer((request, response) => {
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+  response.once("finish", () => {
+    const method = request.method === "GET" || request.method === "POST" ? request.method : "other";
+    const key = `${method}|${metricsRoute(request)}|${response.statusCode}`;
+    requestCounts.set(key, (requestCounts.get(key) ?? 0) + 1);
+  });
   void handleRequest(request, response).catch(() => {
     sendJson(response, 500, { error: "internal_error" });
   });
@@ -341,7 +476,19 @@ async function runQueueWorker(): Promise<void> {
   try {
     const store = await ensureDatabase();
     const claimed = await store.claimNextCase();
-    if (claimed) await processCase(store, claimed.userId, claimed.inspectionCase, claimed.inspectionCase.network);
+    if (claimed) {
+      await processCase(store, claimed.userId, claimed.inspectionCase, claimed.inspectionCase.network);
+    } else {
+      const evaluation = await store.claimNextEvaluation();
+      if (evaluation) {
+        try {
+          const metrics = runEvaluation(evaluation.evaluation.fixtureSetVersion);
+          await store.completeEvaluation(evaluation.userId, evaluation.evaluation.id, metrics);
+        } catch {
+          await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_failed");
+        }
+      }
+    }
   } catch {
     process.stderr.write("Case queue worker could not process its next item.\n");
   } finally {

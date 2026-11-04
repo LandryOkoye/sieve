@@ -16,13 +16,22 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `AUTH_ISSUER` | OIDC issuer URL for API access tokens |
 | `AUTH_AUDIENCE` | Expected audience claim for API access tokens |
 | `AUTH_JWKS_URL` | HTTPS URL for the issuer's signing keys |
+| `METRICS_BEARER_TOKEN` | Optional, at least 32-character token protecting the Prometheus `/metrics` endpoint |
 
 All three `AUTH_*` values must be configured together. `GET /api/v1/me` requires
 a valid bearer token and a configured PostgreSQL database, then returns the
 stable SIEVE user ID associated with the token's verified issuer and subject.
+
+API responses include no-sniff, no-frame, no-referrer, no-store, and restrictive
+content-security headers. Terminate HTTPS at a trusted deployment boundary;
+the API does not set HSTS because TLS termination belongs to that boundary.
 
 The liveness route reports whether the process is running. Readiness applies
 the SQL migrations and checks PostgreSQL when `DATABASE_URL` is configured.
 Tatum and Walrus are reported as `unverified` until their connection checks are
 wired in; configured values are never reported as a successful connection by
 presence alone.
+
+## Operational metrics
+
+When `METRICS_BEARER_TOKEN` is configured, `GET /metrics` returns Prometheus text metrics for process uptime and memory, background-worker activity, and completed HTTP request counts by bounded route, method, and status. Scrape it with `Authorization: Bearer <token>`. The endpoint returns `404` when metrics are disabled and never emits request query strings, identifiers, or credentials. Keep the token in the deployment's secret store.

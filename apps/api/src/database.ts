@@ -2,7 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import type { DetectorVerdict, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork } from "@sieve/contracts";
+import type { DetectorVerdict, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
+import { applyEvaluationThresholds } from "@sieve/evaluation";
 
 const migrationsDirectory = new URL("../../../db/migrations/", import.meta.url);
 
@@ -73,6 +74,10 @@ export class Database {
       `UPDATE inspection_cases SET status = 'queued', failure_code = NULL, updated_at = now()
        WHERE status IN ('fetching_evidence', 'assessing') AND updated_at < now() - interval '2 minutes'`,
     );
+    await this.pool.query(
+      `UPDATE evaluation_runs SET status = 'queued', failure_code = NULL
+       WHERE status = 'running' AND created_at < now() - interval '2 minutes'`,
+    );
   }
 
   async claimNextCase(): Promise<{ userId: string; inspectionCase: InspectionCase } | null> {
@@ -124,6 +129,110 @@ export class Database {
   async getCase(userId: string, caseId: string): Promise<InspectionCase | null> {
     const result = await this.pool.query<CaseRow>(caseSelect + " WHERE c.user_id = $1 AND c.id = $2", [userId, caseId]);
     return result.rows[0] ? toInspectionCase(result.rows[0]) : null;
+  }
+
+  async getThreatMemoryWrite(userId: string, memoryId: string): Promise<ThreatMemoryWrite | null> {
+    const result = await this.pool.query<ThreatMemoryRow>(
+      `${threatMemorySelect} WHERE user_id = $1 AND id = $2`,
+      [userId, memoryId],
+    );
+    return result.rows[0] ? toThreatMemoryWrite(result.rows[0]) : null;
+  }
+
+  async listThreatMemoryWrites(userId: string, limit: number, cursor?: { createdAt: string; id: string }): Promise<{ memories: ThreatMemoryWrite[]; hasMore: boolean; lastCursor: { createdAt: string; id: string } | null }> {
+    const values: unknown[] = [userId];
+    let cursorClause = "";
+    if (cursor) {
+      values.push(cursor.createdAt, cursor.id);
+      cursorClause = " AND (created_at, id) < ($2::timestamptz, $3::text)";
+    }
+    values.push(limit + 1);
+    const result = await this.pool.query<ThreatMemoryRow>(
+      `${threatMemorySelect} WHERE user_id = $1${cursorClause} ORDER BY created_at DESC, id DESC LIMIT $${values.length}`,
+      values,
+    );
+    const hasMore = result.rows.length > limit;
+    const rows = result.rows.slice(0, limit);
+    const last = rows.at(-1);
+    return {
+      memories: rows.map(toThreatMemoryWrite),
+      hasMore,
+      lastCursor: last ? { createdAt: last.cursor_created_at, id: last.id } : null,
+    };
+  }
+
+  async createEvaluation(userId: string, fixtureSetVersion: string): Promise<EvaluationRun> {
+    const result = await this.pool.query<EvaluationRow>(
+      `INSERT INTO evaluation_runs (id, user_id, status, fixture_set_version, detector_config)
+       VALUES ($1, $2, 'queued', $3, $4::jsonb)
+       RETURNING id, status, fixture_set_version, detector_config, metrics, failure_code, created_at, completed_at`,
+      [randomUUID(), userId, fixtureSetVersion, JSON.stringify({ detectorVersion: "baseline-rules-v1" })],
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("Could not create evaluation run");
+    return toEvaluationRun(row);
+  }
+
+  async claimNextEvaluation(): Promise<{ userId: string; evaluation: EvaluationRun } | null> {
+    const result = await this.pool.query<{ id: string; user_id: string }>(
+      `WITH next_run AS (
+         SELECT id FROM evaluation_runs WHERE status = 'queued'
+         ORDER BY created_at, id FOR UPDATE SKIP LOCKED LIMIT 1
+       )
+       UPDATE evaluation_runs e SET status = 'running'
+       FROM next_run WHERE e.id = next_run.id RETURNING e.id, e.user_id`,
+    );
+    const claimed = result.rows[0];
+    if (!claimed) return null;
+    const evaluation = await this.getEvaluation(claimed.user_id, claimed.id);
+    return evaluation ? { userId: claimed.user_id, evaluation } : null;
+  }
+
+  async completeEvaluation(userId: string, evaluationId: string, metrics: EvaluationMetrics): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE evaluation_runs SET status = 'completed', metrics = $3::jsonb, failure_code = NULL, completed_at = now()
+       WHERE id = $1 AND user_id = $2 AND status = 'running'`,
+      [evaluationId, userId, JSON.stringify(metrics)],
+    );
+    if (result.rowCount !== 1) throw new Error("Evaluation run was not found or is not running");
+  }
+
+  async failEvaluation(userId: string, evaluationId: string, failureCode: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE evaluation_runs SET status = 'failed', failure_code = $3, completed_at = now()
+       WHERE id = $1 AND user_id = $2 AND status = 'running'`,
+      [evaluationId, userId, failureCode],
+    );
+  }
+
+  async getEvaluation(userId: string, evaluationId: string): Promise<EvaluationRun | null> {
+    const result = await this.pool.query<EvaluationRow>(
+      `${evaluationSelect} WHERE user_id = $1 AND id = $2`,
+      [userId, evaluationId],
+    );
+    return result.rows[0] ? toEvaluationRun(result.rows[0]) : null;
+  }
+
+  async listEvaluations(userId: string, limit: number, cursor?: { createdAt: string; id: string }): Promise<{ evaluations: EvaluationRun[]; hasMore: boolean; lastCursor: { createdAt: string; id: string } | null }> {
+    const values: unknown[] = [userId];
+    let cursorClause = "";
+    if (cursor) {
+      values.push(cursor.createdAt, cursor.id);
+      cursorClause = " AND (created_at, id) < ($2::timestamptz, $3::text)";
+    }
+    values.push(limit + 1);
+    const result = await this.pool.query<EvaluationRow>(
+      `${evaluationSelect} WHERE user_id = $1${cursorClause} ORDER BY created_at DESC, id DESC LIMIT $${values.length}`,
+      values,
+    );
+    const hasMore = result.rows.length > limit;
+    const rows = result.rows.slice(0, limit);
+    const last = rows.at(-1);
+    return {
+      evaluations: rows.map(toEvaluationRun),
+      hasMore,
+      lastCursor: last ? { createdAt: last.cursor_created_at, id: last.id } : null,
+    };
   }
 
   async listCases(userId: string, limit: number, cursor?: { createdAt: string; id: string }): Promise<{ cases: InspectionCase[]; hasMore: boolean; lastCursor: { createdAt: string; id: string } | null }> {
@@ -194,6 +303,69 @@ type CaseRow = {
   id: string; network: SuiNetwork; target_kind: "transaction" | "object"; transaction_digest: string | null; object_id: string | null;
   status: InspectionCase["status"]; evidence: EvidenceBundle | null; failure_code: string | null; created_at: Date; updated_at: Date; assessment: DetectorVerdict | null;
 };
+
+type EvaluationRow = {
+  id: string;
+  status: EvaluationRun["status"];
+  fixture_set_version: string;
+  detector_config: unknown;
+  metrics: EvaluationMetrics | null;
+  failure_code: string | null;
+  created_at: Date;
+  completed_at: Date | null;
+  cursor_created_at: string;
+};
+
+type ThreatMemoryRow = {
+  id: string;
+  case_id: string;
+  pattern: string;
+  status: ThreatMemoryWrite["status"];
+  normalized_record: unknown;
+  walrus_job_id: string | null;
+  blob_id: string | null;
+  failure_code: string | null;
+  created_at: Date;
+  updated_at: Date;
+  cursor_created_at: string;
+};
+
+const threatMemorySelect = `SELECT id, case_id, pattern, status, normalized_record, walrus_job_id, blob_id, failure_code,
+  created_at, created_at::text AS cursor_created_at, updated_at FROM threat_memory_writes`;
+
+const evaluationSelect = `SELECT id, status, fixture_set_version, detector_config, metrics, failure_code, created_at,
+  created_at::text AS cursor_created_at, completed_at FROM evaluation_runs`;
+
+function toEvaluationRun(row: EvaluationRow): EvaluationRun {
+  const detectorConfig = row.detector_config && typeof row.detector_config === "object" && !Array.isArray(row.detector_config)
+    ? row.detector_config as Record<string, unknown>
+    : {};
+  return {
+    id: row.id,
+    status: row.status,
+    fixtureSetVersion: row.fixture_set_version,
+    detectorConfig,
+    metrics: row.metrics ? applyEvaluationThresholds(row.metrics) : null,
+    failureCode: row.failure_code,
+    createdAt: row.created_at.toISOString(),
+    completedAt: row.completed_at?.toISOString() ?? null,
+  };
+}
+
+function toThreatMemoryWrite(row: ThreatMemoryRow): ThreatMemoryWrite {
+  return {
+    id: row.id,
+    caseId: row.case_id,
+    pattern: row.pattern,
+    status: row.status,
+    normalizedRecord: row.normalized_record,
+    walrusJobId: row.walrus_job_id,
+    blobId: row.blob_id,
+    failureCode: row.failure_code,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
 
 const caseSelect = `SELECT c.id, c.network, c.target_kind, c.transaction_digest, c.object_id, c.status, c.evidence, c.failure_code, c.created_at, c.created_at::text AS cursor_created_at, c.updated_at,
   (SELECT ar.result FROM assessment_revisions ar WHERE ar.case_id = c.id ORDER BY ar.revision DESC LIMIT 1) AS assessment

@@ -72,3 +72,78 @@ export type InspectionCase = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type ThreatMemoryWriteStatus = "pending" | "accepted" | "uploaded" | "completed" | "failed";
+
+export type ThreatMemoryWrite = {
+  id: string;
+  caseId: string;
+  pattern: string;
+  status: ThreatMemoryWriteStatus;
+  normalizedRecord: unknown;
+  walrusJobId: string | null;
+  blobId: string | null;
+  failureCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ThreatMemoryPage = {
+  memories: ThreatMemoryWrite[];
+  limit: number;
+  nextCursor: string | null;
+};
+
+export type EvaluationRunStatus = "queued" | "running" | "completed" | "failed";
+
+export type EvaluationCategoryMetrics = {
+  support: number;
+  detected: number;
+  falsePositives: number;
+};
+
+export type EvaluationAcceptance = {
+  overallRecall: boolean;
+  categoryRecall: Record<ThreatCategory, boolean>;
+  falsePositiveRate: boolean;
+  passed: boolean;
+};
+
+export type EvaluationThresholds = {
+  minimumOverallRecall: number;
+  minimumCategoryRecall: number;
+  maximumFalsePositiveRate: number;
+};
+
+export type EvaluationMetrics = {
+  fixtureCount: number;
+  attackCount: number;
+  benignCount: number;
+  truePositives: number;
+  falsePositives: number;
+  trueNegatives: number;
+  falseNegatives: number;
+  precision: number | null;
+  recall: number | null;
+  falsePositiveRate: number | null;
+  categories: Record<ThreatCategory, EvaluationCategoryMetrics>;
+  thresholds: EvaluationThresholds;
+  acceptance: EvaluationAcceptance;
+};
+
+export type EvaluationRun = {
+  id: string;
+  status: EvaluationRunStatus;
+  fixtureSetVersion: string;
+  detectorConfig: Record<string, unknown>;
+  metrics: EvaluationMetrics | null;
+  failureCode: string | null;
+  createdAt: string;
+  completedAt: string | null;
+};
+
+export type EvaluationPage = {
+  evaluations: EvaluationRun[];
+  limit: number;
+  nextCursor: string | null;
+};

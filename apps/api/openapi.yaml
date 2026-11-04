@@ -126,6 +126,107 @@ paths:
           description: Failed case has been queued for another attempt.
         '404':
           description: The case is not owned by the caller or is not failed.
+  /api/v1/threat-memories:
+    get:
+      summary: List the caller's persisted threat memory writes
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string, description: Opaque cursor returned as nextCursor }
+      responses:
+        '200':
+          description: Owner-scoped memory records and write statuses.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [memories, limit, nextCursor]
+                properties:
+                  memories:
+                    type: array
+                    items: { $ref: '#/components/schemas/ThreatMemoryWrite' }
+                  limit: { type: integer }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/threat-memories/{memoryId}:
+    parameters:
+      - in: path
+        name: memoryId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Retrieve one owner-scoped threat memory write
+      responses:
+        '200':
+          description: Stored normalized record and write status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ThreatMemoryWrite' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/evaluations:
+    post:
+      summary: Start a fixture-based detector evaluation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [fixtureSetVersion]
+              properties:
+                fixtureSetVersion:
+                  type: string
+                  enum: [sieve-baseline-v1, sieve-heldout-v1, sieve-variants-v1, sieve-dev-v1, sieve-validation-v1]
+      responses:
+        '202':
+          description: Evaluation was persisted and queued.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationRun' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    get:
+      summary: List the caller's evaluation runs
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string, description: Opaque cursor returned as nextCursor }
+      responses:
+        '200':
+          description: A page of owner-scoped evaluation runs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [evaluations, limit, nextCursor]
+                properties:
+                  evaluations:
+                    type: array
+                    items: { $ref: '#/components/schemas/EvaluationRun' }
+                  limit: { type: integer }
+                  nextCursor: { type: [string, 'null'] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/evaluations/{evaluationId}:
+    parameters:
+      - in: path
+        name: evaluationId
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Retrieve one owner-scoped evaluation run
+      responses:
+        '200':
+          description: Evaluation status, fixture version, and metrics.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationRun' }
+        '404': { $ref: '#/components/responses/NotFound' }
 components:
   securitySchemes:
     bearerAuth:
@@ -166,3 +267,69 @@ components:
         failureCode: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+    ThreatMemoryWrite:
+      type: object
+      required: [id, caseId, pattern, status, normalizedRecord, walrusJobId, blobId, failureCode, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        caseId: { type: string, format: uuid }
+        pattern: { type: string }
+        status: { type: string, enum: [pending, accepted, uploaded, completed, failed] }
+        normalizedRecord: { description: Normalized structured threat record }
+        walrusJobId: { type: [string, 'null'] }
+        blobId: { type: [string, 'null'] }
+        failureCode: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    EvaluationRun:
+      type: object
+      required: [id, status, fixtureSetVersion, detectorConfig, metrics, failureCode, createdAt, completedAt]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, completed, failed] }
+        fixtureSetVersion: { type: string }
+        detectorConfig: { type: object }
+        metrics: { oneOf: [{ $ref: '#/components/schemas/EvaluationMetrics' }, { type: 'null' }] }
+        failureCode: { type: [string, 'null'] }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+    EvaluationMetrics:
+      type: object
+      required: [fixtureCount, attackCount, benignCount, truePositives, falsePositives, trueNegatives, falseNegatives, precision, recall, falsePositiveRate, categories, thresholds, acceptance]
+      properties:
+        fixtureCount: { type: integer }
+        attackCount: { type: integer }
+        benignCount: { type: integer }
+        truePositives: { type: integer }
+        falsePositives: { type: integer }
+        trueNegatives: { type: integer }
+        falseNegatives: { type: integer }
+        precision: { type: [number, 'null'] }
+        recall: { type: [number, 'null'] }
+        falsePositiveRate: { type: [number, 'null'] }
+        categories:
+          type: object
+          additionalProperties:
+            type: object
+            required: [support, detected, falsePositives]
+            properties:
+              support: { type: integer }
+              detected: { type: integer }
+              falsePositives: { type: integer }
+        thresholds:
+          type: object
+          required: [minimumOverallRecall, minimumCategoryRecall, maximumFalsePositiveRate]
+          properties:
+            minimumOverallRecall: { type: number }
+            minimumCategoryRecall: { type: number }
+            maximumFalsePositiveRate: { type: number }
+        acceptance:
+          type: object
+          required: [overallRecall, categoryRecall, falsePositiveRate, passed]
+          properties:
+            overallRecall: { type: boolean }
+            categoryRecall:
+              type: object
+              additionalProperties: { type: boolean }
+            falsePositiveRate: { type: boolean }
+            passed: { type: boolean }

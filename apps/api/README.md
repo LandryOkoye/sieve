@@ -39,8 +39,9 @@ presence alone.
 The deterministic detector works without an LLM. To enable the semantic judge,
 configure both `OPENAI_API_KEY` and `OPENAI_MODEL`; the API sends bounded,
 extracted chain text to the OpenAI Responses API with strict JSON Schema output,
-no tools, and response storage disabled. The model can add suspicious findings
-but cannot remove deterministic findings, write threat memory, or modify policy.
+no tools, and response storage disabled. It runs only when deterministic rules
+find no signal. The model can add suspicious findings but cannot remove rule
+findings, write threat memory, or modify policy.
 The text is explicitly classified as untrusted data. A timeout, refusal,
 malformed response, or unavailable provider produces uncertainty when no rule
 matched, never a clean verdict. Do not configure the integration if chain text

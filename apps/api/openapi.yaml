@@ -178,7 +178,9 @@ paths:
               additionalProperties: false
               required: [fixtureSetVersion]
               properties:
-                fixtureSetVersion: { const: sieve-baseline-v1 }
+                fixtureSetVersion:
+                  type: string
+                  enum: [sieve-baseline-v1, sieve-heldout-v1]
       responses:
         '202':
           description: Evaluation was persisted and queued.

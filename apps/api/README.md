@@ -57,6 +57,8 @@ replacing or deleting that volume. This Compose setup is a local deployment
 baseline; production still needs TLS termination, configured authentication,
 managed backups, and a reviewed release and rollback procedure.
 
+The 2026-11-05 local security review and remaining deployment requirements are recorded in [the review report](security-review-2026-11-05.md).
+
 ## Optional semantic judge
 
 The deterministic detector works without an LLM. To enable the semantic judge,

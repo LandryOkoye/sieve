@@ -1,7 +1,7 @@
 import { loadConfig } from "../apps/api/src/config.js";
 import {
   fixtureSetVersions,
-  freshValidationV2FixtureSetVersion,
+  freshValidationV3FixtureSetVersion,
   runEvaluationDetailed,
 } from "@sieve/evaluation";
 import type { EvaluationFixtureDiagnostic } from "@sieve/evaluation";
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     throw new Error("semantic_judge_not_configured");
   }
 
-  const fixtureSetVersion = process.env.SIEVE_EVALUATION_FIXTURE_SET || freshValidationV2FixtureSetVersion;
+  const fixtureSetVersion = process.env.SIEVE_EVALUATION_FIXTURE_SET || freshValidationV3FixtureSetVersion;
   if (!fixtureSetVersions.includes(fixtureSetVersion as typeof fixtureSetVersions[number])) {
     throw new Error("unsupported_fixture_set");
   }

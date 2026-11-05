@@ -169,7 +169,7 @@ export async function judgeUntrustedText(
     signal: AbortSignal.timeout(15_000),
     body: JSON.stringify(requestBody),
   });
-  if (!response.ok) throw new Error("semantic_judge_unavailable");
+  if (!response.ok) throw new Error(`semantic_judge_http_${response.status}`);
   const payload: unknown = await response.json().catch(() => null);
   const items = parseItems(outputText(payload), submitted.length);
   const findings = items.flatMap((item) => {

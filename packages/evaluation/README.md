@@ -1,5 +1,7 @@
 # Evaluation policy
 
+`sieve-validation-v3` is a newly authored 55-fixture set with eight attacks per category and 23 benign examples. It is the evaluator's default validation set. See [the recorded Groq result](reports/sieve-validation-v3-groq-2026-11-05.md). Keep this set frozen for regression tracking; author a new version for independent acceptance after future detector changes.
+
 The current acceptance targets are:
 
 - Overall attack recall of at least 97%.

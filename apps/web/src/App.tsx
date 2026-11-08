@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { DetectorVerdict, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
 import { api, readableApiError, type Health } from './api'
+import { beginOidcLogin, completeOidcCallback, hasOidcCallback, oidcLoginConfigured } from './oidc'
 import './App.css'
 
 type Page = { name: 'overview' | 'inspect' | 'memory' | 'evaluations' | 'settings' | 'case'; caseId?: string }
@@ -78,7 +79,13 @@ function LoadingScreen() {
   return <main className="auth-screen"><div className="auth-mark"><span className="brand-mark">S</span><span>SIEVE</span></div><div className="auth-card auth-loading"><span className="spinner" /><p>Checking your session…</p></div></main>
 }
 
-function ConnectScreen({ onConnect, message }: { onConnect: (value: string) => Promise<void>; message: string }) {
+function ConnectScreen({ onConnect, onLogin, oidcEnabled, allowManualToken, message }: {
+  onConnect: (value: string) => Promise<void>
+  onLogin: () => Promise<void>
+  oidcEnabled: boolean
+  allowManualToken: boolean
+  message: string
+}) {
   const [accessToken, setAccessToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -88,6 +95,11 @@ function ConnectScreen({ onConnect, message }: { onConnect: (value: string) => P
     setError('')
     try { await onConnect(accessToken.trim()) } catch (cause) { setError(readableApiError(cause)) } finally { setBusy(false) }
   }
+  async function startLogin() {
+    setBusy(true)
+    setError('')
+    try { await onLogin() } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not start secure sign-in.') } finally { setBusy(false) }
+  }
   return <main className="auth-screen">
     <div className="auth-orbit orbit-one" /><div className="auth-orbit orbit-two" />
     <div className="auth-mark"><span className="brand-mark">S</span><span>SIEVE</span><span className="brand-caption">EVIDENCE INTELLIGENCE</span></div>
@@ -95,14 +107,19 @@ function ConnectScreen({ onConnect, message }: { onConnect: (value: string) => P
       <div className="auth-icon"><Icon name="lock" size={21} /></div>
       <p className="eyebrow">SECURE WORKSPACE</p>
       <h1>Connect to SIEVE</h1>
-      <p className="auth-copy">Use an access token issued by your SIEVE identity provider to view your inspection workspace.</p>
-      <form onSubmit={submit} className="connect-form">
+      <p className="auth-copy">Sign in with your SIEVE identity provider to open your inspection workspace.</p>
+      {oidcEnabled && <button className="button button-primary button-wide oidc-login" type="button" onClick={() => void startLogin()} disabled={busy}>
+        {busy ? <><span className="spinner spinner-small" /> Redirecting…</> : <>Sign in securely <Icon name="arrow" size={16} /></>}
+      </button>}
+      {oidcEnabled && allowManualToken && <div className="auth-divider"><span>developer token</span></div>}
+      {allowManualToken && <form onSubmit={submit} className="connect-form">
         <label htmlFor="access-token">Access token</label>
-        <input id="access-token" type="password" autoComplete="current-password" spellCheck={false} value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="Paste your bearer token" required />
-        {error && <div className="inline-error" role="alert">{error}</div>}
-        {message && <div className="inline-error" role="status">{message}</div>}
-        <button className="button button-primary button-wide" disabled={busy || !accessToken.trim()}>{busy ? <><span className="spinner spinner-small" /> Connecting…</> : <>Connect securely <Icon name="arrow" size={16} /></>}</button>
-      </form>
+        <input id="access-token" type="password" autoComplete="current-password" spellCheck={false} value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="Paste a local bearer token" required />
+        <button className="button button-secondary button-wide" disabled={busy || !accessToken.trim()}>{busy ? <><span className="spinner spinner-small" /> Connecting…</> : <>Connect with token <Icon name="arrow" size={16} /></>}</button>
+      </form>}
+      {!oidcEnabled && !allowManualToken && <p className="inline-error" role="status">Sign-in is not configured for this deployment.</p>}
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      {message && <div className="inline-error" role="status">{message}</div>}
       <p className="auth-footnote"><Icon name="lock" size={13} /> Token stays in this browser tab and is cleared when you disconnect.</p>
     </section>
     <p className="auth-bottom">Read-only access · Sui mainnet and testnet</p>
@@ -111,7 +128,7 @@ function ConnectScreen({ onConnect, message }: { onConnect: (value: string) => P
 
 function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem('sieve_access_token') ?? '')
-  const [authState, setAuthState] = useState<'checking' | 'connected' | 'disconnected'>(() => sessionStorage.getItem('sieve_access_token') ? 'checking' : 'disconnected')
+  const [authState, setAuthState] = useState<'checking' | 'connected' | 'disconnected'>(() => hasOidcCallback() || sessionStorage.getItem('sieve_access_token') ? 'checking' : 'disconnected')
   const [userId, setUserId] = useState('')
   const [page, setPage] = useState<Page>(pageFromHash)
   const [cases, setCases] = useState<InspectionCase[]>([])
@@ -128,6 +145,21 @@ function App() {
     const update = () => setPage(pageFromHash())
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
+  }, [])
+
+  useEffect(() => {
+    if (!hasOidcCallback()) return
+    let alive = true
+    completeOidcCallback().then((accessToken) => {
+      if (!alive || !accessToken) return
+      sessionStorage.setItem('sieve_access_token', accessToken)
+      setToken(accessToken)
+    }).catch((error: unknown) => {
+      if (!alive) return
+      setGlobalError(error instanceof Error ? error.message : 'Sign-in could not be completed.')
+      setAuthState('disconnected')
+    })
+    return () => { alive = false }
   }, [])
 
   useEffect(() => {
@@ -247,7 +279,7 @@ function App() {
   }
 
   if (authState === 'checking') return <LoadingScreen />
-  if (authState === 'disconnected') return <ConnectScreen onConnect={connect} message={globalError} />
+  if (authState === 'disconnected') return <ConnectScreen onConnect={connect} onLogin={beginOidcLogin} oidcEnabled={oidcLoginConfigured()} allowManualToken={import.meta.env.DEV} message={globalError} />
 
   const pageTitle = page.name === 'case' ? 'Inspection detail' : ({ overview: 'Overview', inspect: 'Inspect evidence', memory: 'Threat memory', evaluations: 'Evaluations', settings: 'Settings' } as Record<string, string>)[page.name]
   return <div className="app-shell">

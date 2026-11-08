@@ -12,7 +12,9 @@ pnpm --filter @sieve/web dev
 
 Vite proxies `/api` requests to `http://localhost:3001`. Set `VITE_API_BASE_URL` when the API is hosted on a different origin. The API must allow browser requests from that origin in deployed environments.
 
-The current API accepts a bearer token rather than providing a browser sign-in redirect. Enter a valid access token on the connect screen. It is kept in this tab's `sessionStorage` and removed when you disconnect.
+The connect screen supports OIDC authorization-code sign-in with PKCE. Configure a public SPA client in your identity provider and allow `http://localhost:5173/` as a redirect URI. The app verifies the ID token signature, issuer, audience, and nonce before sending its access token to the API. Tokens stay in this tab's `sessionStorage` and are removed when you disconnect. Manual bearer-token entry is available only in Vite development mode.
+
+Copy `apps/web/.env.example` to `apps/web/.env.local` and set `VITE_OIDC_ISSUER` and `VITE_OIDC_CLIENT_ID`. The issuer must exactly match the API's `AUTH_ISSUER`. Configure `AUTH_AUDIENCE` on the API to match the access token; set `VITE_OIDC_AUDIENCE` when your provider requires an audience parameter in the authorization request. No client secret belongs in the browser app. The identity provider must allow discovery, JWKS, and token-exchange requests from the browser origin.
 
 ## Available views
 

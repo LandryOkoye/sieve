@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@sieve/contracts": "workspace:*",
+    "jose": "^6.2.12",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

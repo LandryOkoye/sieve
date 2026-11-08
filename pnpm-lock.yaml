@@ -47,6 +47,9 @@ importers:
       '@sieve/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.15
       react:
         specifier: ^19.3.1
         version: 19.3.1

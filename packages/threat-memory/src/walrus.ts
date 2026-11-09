@@ -133,7 +133,7 @@ export class WalrusThreatMemory {
 
   async store(decision: MemoryWriteDecision) {
     if (!decision.allowed) throw new Error("Threat memory write was rejected by SIEVE policy");
-    return this.client.rememberAndWait(JSON.stringify(decision.record), this.namespace);
+    return this.client.rememberAndWait(JSON.stringify(decision.record), this.namespace, { dedupe: true });
   }
 
   async recall(query: string, limit = 10): Promise<ThreatMemoryRecall> {

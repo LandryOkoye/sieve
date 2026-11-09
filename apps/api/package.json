@@ -21,6 +21,7 @@
     "@sieve/contracts": "workspace:*",
     "@sieve/detector": "workspace:*",
     "@sieve/evaluation": "workspace:*",
+    "@sieve/threat-memory": "workspace:*",
     "jose": "^6.2.12",
     "pg": "^8.23.1"
   }

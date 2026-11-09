@@ -5,12 +5,15 @@ import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect, judgeUntrustedText } from "@sieve/detector";
+import { authorizeMemoryWrite } from "@sieve/threat-memory/policy";
+import { WalrusThreatMemory as WalrusMemoryClient } from "@sieve/threat-memory/walrus";
 import { baselineFixtureSetVersion, fixtureSetVersions, runEvaluation } from "@sieve/evaluation";
 import type { ChainFact, EvaluationDetectorConfig, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
 const config = loadConfig();
 const database = config.databaseUrl ? new Database(config.databaseUrl) : undefined;
 const authenticator = config.auth ? new OidcAuthenticator(config.auth) : undefined;
+const walrusMemory = config.walrusMemory ? new WalrusMemoryClient(config.walrusMemory) : undefined;
 let databaseInitialized = false;
 let queueWorkerBusy = false;
 const requestCounts = new Map<string, number>();
@@ -118,6 +121,25 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         integrations.authentication = "available";
       } catch {
         integrations.authentication = "unavailable";
+      }
+    }
+    if (config.tatumApiKey) {
+      const tatum = new TatumSuiClient({ apiKey: config.tatumApiKey, network: config.suiNetwork });
+      try {
+        await tatum.checkConnection();
+        integrations.tatum = "available";
+      } catch {
+        integrations.tatum = "unavailable";
+      } finally {
+        tatum.close();
+      }
+    }
+    if (walrusMemory) {
+      try {
+        await walrusMemory.checkConnection();
+        integrations.walrusMemory = "available";
+      } catch {
+        integrations.walrusMemory = "unavailable";
       }
     }
     const ready = Object.entries(integrations)
@@ -475,12 +497,44 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
       ? `baseline-rules-v2+${config.semanticJudge.provider}:${config.semanticJudge.model}`
       : "baseline-rules-v2";
     await store.saveAssessment(userId, inspectionCase.id, verdict, detectorVersion);
+    await persistAuthorizedThreatMemories(store, userId, inspectionCase.id, verdict, bundle);
   } catch {
     await store.updateCaseStatus(userId, inspectionCase.id, "failed", undefined, "evidence_provider_unavailable");
   } finally {
     client.close();
   }
   return (await store.getCase(userId, inspectionCase.id))!;
+}
+
+async function persistAuthorizedThreatMemories(
+  store: Database,
+  userId: string,
+  caseId: string,
+  verdict: Awaited<ReturnType<typeof detect>>,
+  evidence: EvidenceBundle,
+): Promise<void> {
+  if (!walrusMemory) return;
+  for (const finding of verdict.findings) {
+    const decision = authorizeMemoryWrite(finding, evidence);
+    if (!decision.allowed) continue;
+    let memoryId: string | undefined;
+    try {
+      const memory = await store.createThreatMemoryWrite(userId, caseId, decision.record);
+      memoryId = memory.id;
+      if (memory.status === "completed") continue;
+      const storedRecord = memory.normalizedRecord as typeof decision.record;
+      const result = await walrusMemory.store({ allowed: true, record: storedRecord });
+      await store.completeThreatMemoryWrite(userId, memory.id, result.job_id ?? result.id, result.blob_id);
+    } catch {
+      if (memoryId) {
+        try {
+          await store.failThreatMemoryWrite(userId, memoryId, "walrus_write_unavailable");
+        } catch {
+          // A later case retry can recover a write that the database could not update.
+        }
+      }
+    }
+  }
 }
 
 function evaluationJudgeConfig(detectorConfig: EvaluationDetectorConfig) {

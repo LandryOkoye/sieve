@@ -134,3 +134,7 @@ adapter is not wired into decisions until that authorization seam is implemented
 
 Validated records retain their review provenance after revocation or false-positive
 marking for audit purposes; terminal records remain excluded from recall.
+
+A tested candidate builder emits only fixed SIEVE-authored summaries, detector feature
+IDs, a content hash, bounded scope, and a 90-day local memory expiry. It is not yet
+connected to the inspection request lifecycle.

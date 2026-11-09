@@ -84,9 +84,9 @@ export async function inspectForAgent(input: {
     body: {
       id: stored.inspection.id,
       contentHash,
-      assessment: { outcome: assessment.verdict.outcome, findings: assessment.verdict.findings },
-      decision: { action, policyVersion: agent.policyVersion },
-      memoryEvidence: assessment.memories.map(({ id, category, techniqueId, safeFingerprint }) => ({ id, category, techniqueId, safeFingerprint })),
+      assessment: { outcome: stored.inspection.outcome, findings: stored.inspection.findings },
+      decision: { action: stored.inspection.action, policyVersion: agent.policyVersion },
+      memoryEvidence: stored.inspection.memoryIds.map((id) => ({ id, role: "supporting_context" })),
       createdAt: stored.inspection.createdAt,
       expiresAt: stored.inspection.expiresAt,
     },

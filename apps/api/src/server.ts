@@ -1,8 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { loadConfig } from "./config.js";
 import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
+import { hashAgentCredential, issueAgentCredential, readAgentBearer } from "./agent-credentials.js";
+import { inspectForAgent } from "./agent-service.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect, judgeUntrustedText } from "@sieve/detector";
 import { authorizeMemoryWrite } from "@sieve/threat-memory/policy";
@@ -38,6 +40,8 @@ function metricsRoute(request: IncomingMessage): string {
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
   if (path === "/api/v1/health/live" || path === "/api/v1/health/ready" || path === "/metrics") return path;
   if (path === "/api/v1/me") return path;
+  if (path === "/api/v1/agents") return path;
+  if (path === "/api/v1/agent/inspect") return path;
   if (path === "/api/v1/cases") return path;
   if (/^\/api\/v1\/cases\/[0-9a-f-]{36}\/retry$/i.test(path)) return "/api/v1/cases/:id/retry";
   if (/^\/api\/v1\/cases\/[0-9a-f-]{36}$/i.test(path)) return "/api/v1/cases/:id";
@@ -152,8 +156,54 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
+  if (requestUrl.pathname === "/api/v1/agent/inspect") {
+    if (request.method !== "POST") {
+      sendJson(response, 405, { error: "method_not_allowed" });
+      return;
+    }
+    if (!database) {
+      sendJson(response, 503, { error: "database_not_configured" });
+      return;
+    }
+    const bearer = readAgentBearer(request.headers.authorization);
+    const tokenHash = bearer ? hashAgentCredential(bearer) : null;
+    const requestIdHeader = request.headers["idempotency-key"];
+    if (!tokenHash) {
+      sendJson(response, 401, { error: "invalid_agent_credential" });
+      return;
+    }
+    if (typeof requestIdHeader !== "string") {
+      sendJson(response, 400, { error: "idempotency_key_required" });
+      return;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = await readJsonBody(request, 400_000);
+    } catch {
+      sendJson(response, 400, { error: "invalid_json_body" });
+      return;
+    }
+    try {
+      const store = await ensureDatabase();
+      const result = await inspectForAgent({
+        store,
+        tokenHash,
+        requestId: requestIdHeader,
+        body,
+        ...(config.semanticJudge ? {
+          semanticReview: (items, memories) => judgeUntrustedText(items, config.semanticJudge!, memories),
+        } : {}),
+      });
+      sendJson(response, result.status, result.body);
+    } catch {
+      sendJson(response, 503, { error: "agent_inspection_unavailable" });
+    }
+    return;
+  }
+
   const isProtectedRoute =
     (request.method === "GET" && requestUrl.pathname === "/api/v1/me") ||
+    requestUrl.pathname.startsWith("/api/v1/agents") ||
     requestUrl.pathname.startsWith("/api/v1/cases") ||
     requestUrl.pathname.startsWith("/api/v1/threat-memories") ||
     requestUrl.pathname.startsWith("/api/v1/evaluations");
@@ -180,6 +230,26 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       const userId = await store.resolveUserId(principal.issuer, principal.subject);
       if (requestUrl.pathname === "/api/v1/me") {
         sendJson(response, 200, { userId });
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/v1/agents") {
+        let body: Record<string, unknown>;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          sendJson(response, 400, { error: "invalid_json_body" });
+          return;
+        }
+        if (Object.keys(body).some((key) => key !== "name") || typeof body.name !== "string" ||
+            body.name.trim().length < 1 || body.name.trim().length > 120) {
+          sendJson(response, 400, { error: "invalid_agent_request" });
+          return;
+        }
+        const credential = issueAgentCredential();
+        const agent = await store.createProtectedAgent(userId, body.name.trim(), {
+          id: randomUUID(), tokenHash: credential.tokenHash, prefix: credential.prefix,
+        });
+        sendJson(response, 201, { agent, credential: { secret: credential.secret, prefix: credential.prefix } });
         return;
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/v1/cases") {
@@ -325,13 +395,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   sendJson(response, 404, { error: "not_found" });
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJsonBody(request: IncomingMessage, maximumBytes = 16_384): Promise<Record<string, unknown>> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > 16_384) throw new Error("Request body too large");
+    if (size > maximumBytes) throw new Error("Request body too large");
     chunks.push(buffer);
   }
   const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));

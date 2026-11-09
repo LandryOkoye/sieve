@@ -107,3 +107,9 @@ threshold acceptance reporting.
 ## Operational metrics
 
 When `METRICS_BEARER_TOKEN` is configured, `GET /metrics` returns Prometheus text metrics for process uptime and memory, background-worker activity, and completed HTTP request counts by bounded route, method, and status. Scrape it with `Authorization: Bearer <token>`. The endpoint returns `404` when metrics are disabled and never emits request query strings, identifiers, or credentials. Keep the token in the deployment's secret store.
+
+The backend also has a tested direct-content assessment seam that runs deterministic
+inspection, validates active Walrus-shaped memory records against scope and expiry,
+then performs optional contextual review before choosing allow, review, or block.
+This seam is not yet exposed as the developer HTTP endpoint; API-key provisioning,
+durable inspection records, and the TypeScript SDK remain implementation work.

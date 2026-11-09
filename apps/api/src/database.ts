@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import type { DetectorVerdict, EvaluationDetectorConfig, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
 import { applyEvaluationThresholds } from "@sieve/evaluation";
 import type { ThreatMemoryRecord } from "@sieve/threat-memory/policy";
+import { canRecallThreatMemory, parseThreatMemory, type MemoryRecallScope, type ThreatMemory } from "@sieve/threat-memory/lifecycle";
 import type { InspectionAction } from "./inspection.js";
 
 export type ProtectedAgent = {
@@ -41,6 +42,8 @@ export type StoredDirectInspection = {
   createdAt: string;
   expiresAt: string;
 };
+
+export type WalrusLifecycleHit = { memory: ThreatMemory; blobId: string };
 
 const migrationsDirectory = new URL("../../../db/migrations/", import.meta.url);
 
@@ -168,6 +171,129 @@ export class Database {
     } finally {
       client.release();
     }
+  }
+
+  async createThreatMemoryCandidate(record: ThreatMemory, sourceInspectionId: string): Promise<{ memory: ThreatMemory; walrusStatus: string; blobId: string | null }> {
+    const parsed = parseThreatMemory(record);
+    if (!parsed || parsed.status !== "candidate" || parsed.validation !== null || parsed.scope.kind === "global") {
+      throw new Error("invalid_threat_memory_candidate");
+    }
+    const workspaceId = parsed.scope.workspaceId;
+    const agentId = parsed.scope.kind === "agent" ? parsed.scope.agentId : null;
+    const owner = await this.pool.query<{ owner_user_id: string }>("SELECT owner_user_id FROM workspaces WHERE id = $1", [workspaceId]);
+    const createdBy = owner.rows[0]?.owner_user_id;
+    if (!createdBy) throw new Error("threat_memory_workspace_not_found");
+    const normalized = { ...parsed, createdBy };
+    await this.pool.query(
+      `INSERT INTO threat_memories (id,scope,workspace_id,agent_id,category,technique_id,safe_fingerprint,minimized_record,status,created_by,source_inspection_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'candidate',$9,$10)
+       ON CONFLICT (source_inspection_id,safe_fingerprint) WHERE source_inspection_id IS NOT NULL DO NOTHING`,
+      [normalized.id, normalized.scope.kind, workspaceId, agentId, normalized.category, normalized.techniqueId,
+        normalized.safeFingerprint, JSON.stringify(normalized), createdBy, sourceInspectionId],
+    );
+    const stored = await this.pool.query<LifecycleMemoryRow>(
+      `SELECT id,scope,workspace_id,agent_id,minimized_record,status,walrus_blob_id,walrus_status,walrus_expires_at
+       FROM threat_memories WHERE source_inspection_id = $1 AND safe_fingerprint = $2`,
+      [sourceInspectionId, normalized.safeFingerprint],
+    );
+    const row = stored.rows[0];
+    const memory = row ? parseThreatMemory(row.minimized_record) : null;
+    if (!row || !memory || row.status !== memory.status) throw new Error("threat_memory_candidate_not_persisted");
+    return { memory, walrusStatus: row.walrus_status, blobId: row.walrus_blob_id };
+  }
+
+  async completeLifecycleMemoryWrite(memoryId: string, jobId: string, blobId: string, endEpoch: number, expiresAt: string): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE threat_memories SET walrus_status = 'stored', walrus_job_id = $2, walrus_blob_id = $3,
+       walrus_end_epoch = $4, walrus_expires_at = $5, last_reconciled_at = now(), updated_at = now()
+       WHERE id = $1 AND status = 'candidate'`, [memoryId, jobId, blobId, endEpoch, expiresAt],
+    );
+    if (result.rowCount !== 1) throw new Error("threat_memory_write_not_completable");
+  }
+
+  async failLifecycleMemoryWrite(memoryId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE threat_memories SET walrus_status = 'failed', last_reconciled_at = now(), updated_at = now()
+       WHERE id = $1 AND status = 'candidate'`, [memoryId],
+    );
+  }
+
+  async getThreatMemoryForReview(userId: string, memoryId: string, canReviewGlobal: boolean): Promise<{ memory: ThreatMemory; blobId: string | null; walrusStatus: string } | null> {
+    const result = await this.pool.query<LifecycleMemoryRow>(
+      `SELECT m.id,m.scope,m.workspace_id,m.agent_id,m.minimized_record,m.status,m.walrus_blob_id,m.walrus_status,m.walrus_expires_at
+       FROM threat_memories m LEFT JOIN workspace_members wm ON wm.workspace_id = m.workspace_id AND wm.user_id = $2
+       WHERE m.id = $1 AND ((m.scope = 'global' AND $3) OR wm.role IN ('owner','reviewer'))`, [memoryId, userId, canReviewGlobal],
+    );
+    const row = result.rows[0];
+    const memory = row ? parseThreatMemory(row.minimized_record) : null;
+    return row && memory && row.status === memory.status ? { memory, blobId: row.walrus_blob_id, walrusStatus: row.walrus_status } : null;
+  }
+
+  async saveThreatMemoryReview(input: {
+    memory: ThreatMemory; action: string; reviewerId: string; canReviewGlobal: boolean; rationale: string; details: Record<string, unknown>;
+    expectedStatus: string; blobId?: string; endEpoch?: number; expiresAt?: string;
+  }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query<{ status: string }>(
+        `SELECT m.status FROM threat_memories m WHERE m.id = $1 AND (
+           (m.scope = 'global' AND $3) OR EXISTS (
+             SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = m.workspace_id
+               AND wm.user_id = $2 AND wm.role IN ('owner','reviewer')
+           )
+         ) FOR UPDATE OF m`, [input.memory.id, input.reviewerId, input.canReviewGlobal],
+      );
+      if (current.rows[0]?.status !== input.expectedStatus) {
+        await client.query("ROLLBACK");
+        return false;
+      }
+      if (input.action === "promote" && (!input.blobId || input.endEpoch === undefined || !input.expiresAt)) {
+        throw new Error("active_memory_requires_confirmed_walrus_expiry");
+      }
+      await client.query(
+        `UPDATE threat_memories SET status = $2, minimized_record = $3::jsonb,
+         walrus_blob_id = COALESCE($4, walrus_blob_id), walrus_status = CASE WHEN $4 IS NULL THEN walrus_status ELSE 'stored' END,
+         walrus_end_epoch = COALESCE($5, walrus_end_epoch), walrus_expires_at = COALESCE($6, walrus_expires_at),
+         last_reconciled_at = CASE WHEN $4 IS NULL THEN last_reconciled_at ELSE now() END, updated_at = now()
+         WHERE id = $1`,
+        [input.memory.id, input.memory.status, JSON.stringify(input.memory), input.blobId ?? null, input.endEpoch ?? null, input.expiresAt ?? null],
+      );
+      await client.query(
+        `INSERT INTO memory_review_events (id,memory_id,reviewer_user_id,action,rationale,details)
+         VALUES ($1,$2,$3,$4,$5,$6::jsonb)`,
+        [randomUUID(), input.memory.id, input.reviewerId, input.action, input.rationale, JSON.stringify(input.details)],
+      );
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async authorizeRecalledMemories(agent: ProtectedAgent, scope: MemoryRecallScope, hits: readonly WalrusLifecycleHit[], now: string): Promise<ThreatMemory[]> {
+    const eligible: ThreatMemory[] = [];
+    for (const hit of hits.slice(0, 20)) {
+      const result = await this.pool.query<LifecycleMemoryRow>(
+        `SELECT id,scope,workspace_id,agent_id,minimized_record,status,walrus_blob_id,walrus_status,walrus_expires_at
+         FROM threat_memories WHERE id = $1`, [hit.memory.id],
+      );
+      const row = result.rows[0];
+      const canonical = row ? parseThreatMemory(row.minimized_record) : null;
+      if (!row || !canonical || row.status !== "active" || row.walrus_status !== "stored" ||
+          row.walrus_blob_id !== hit.blobId || hit.memory.safeFingerprint !== canonical.safeFingerprint ||
+          row.scope !== canonical.scope.kind || row.workspace_id !== (canonical.scope.kind === "global" ? null : canonical.scope.workspaceId) ||
+          row.agent_id !== (canonical.scope.kind === "agent" ? canonical.scope.agentId : null) ||
+          (row.walrus_expires_at && row.walrus_expires_at.getTime() <= Date.parse(now)) ||
+          !canRecallThreatMemory(canonical, scope, now)) continue;
+      if (canonical.scope.kind !== "global" && canonical.scope.workspaceId !== agent.workspaceId) continue;
+      if (canonical.scope.kind === "agent" && canonical.scope.agentId !== agent.id) continue;
+      eligible.push(canonical);
+    }
+    return eligible;
   }
 
   async createCase(userId: string, network: SuiNetwork, target: LookupTarget, idempotencyKey: string | undefined): Promise<{ inspectionCase: InspectionCase; created: boolean }> {
@@ -494,6 +620,18 @@ type DirectInspectionRow = {
   source_ref_hash: string | null;
   created_at: Date;
   expires_at: Date;
+};
+
+type LifecycleMemoryRow = {
+  id: string;
+  scope: ThreatMemory["scope"]["kind"];
+  workspace_id: string | null;
+  agent_id: string | null;
+  minimized_record: unknown;
+  status: string;
+  walrus_blob_id: string | null;
+  walrus_status: string;
+  walrus_expires_at: Date | null;
 };
 
 type EvaluationRow = {

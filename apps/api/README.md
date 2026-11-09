@@ -138,3 +138,5 @@ marking for audit purposes; terminal records remain excluded from recall.
 A tested candidate builder emits only fixed SIEVE-authored summaries, detector feature
 IDs, a content hash, bounded scope, and a 90-day local memory expiry. It is not yet
 connected to the inspection request lifecycle.
+
+PostgreSQL lifecycle methods now authorize reviewers per workspace and validate Walrus hits against active records and the exact promoted blob reference.

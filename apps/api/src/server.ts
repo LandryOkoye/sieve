@@ -4,13 +4,16 @@ import { loadConfig } from "./config.js";
 import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
-import { detect } from "@sieve/detector";
+import { detect, judgeUntrustedText } from "@sieve/detector";
+import { authorizeMemoryWrite } from "@sieve/threat-memory/policy";
+import { WalrusThreatMemory as WalrusMemoryClient } from "@sieve/threat-memory/walrus";
 import { baselineFixtureSetVersion, fixtureSetVersions, runEvaluation } from "@sieve/evaluation";
-import type { ChainFact, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
+import type { ChainFact, EvaluationDetectorConfig, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
 const config = loadConfig();
 const database = config.databaseUrl ? new Database(config.databaseUrl) : undefined;
 const authenticator = config.auth ? new OidcAuthenticator(config.auth) : undefined;
+const walrusMemory = config.walrusMemory ? new WalrusMemoryClient(config.walrusMemory) : undefined;
 let databaseInitialized = false;
 let queueWorkerBusy = false;
 const requestCounts = new Map<string, number>();
@@ -120,7 +123,28 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
         integrations.authentication = "unavailable";
       }
     }
-    const ready = Object.values(integrations).every((status) => status === "available");
+    if (config.tatumApiKey) {
+      const tatum = new TatumSuiClient({ apiKey: config.tatumApiKey, network: config.suiNetwork });
+      try {
+        await tatum.checkConnection();
+        integrations.tatum = "available";
+      } catch {
+        integrations.tatum = "unavailable";
+      } finally {
+        tatum.close();
+      }
+    }
+    if (walrusMemory) {
+      try {
+        await walrusMemory.checkConnection();
+        integrations.walrusMemory = "available";
+      } catch {
+        integrations.walrusMemory = "unavailable";
+      }
+    }
+    const ready = Object.entries(integrations)
+      .filter(([name]) => name !== "semanticJudge")
+      .every(([, status]) => status === "available");
     sendJson(response, ready ? 200 : 503, {
       status: ready ? "ready" : "not_ready",
       integrations,
@@ -265,7 +289,10 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
           sendJson(response, 400, { error: "unsupported_fixture_set" });
           return;
         }
-        const evaluation = await store.createEvaluation(userId, fixtureSetVersion);
+        const evaluation = await store.createEvaluation(userId, fixtureSetVersion, {
+          detectorVersion: "baseline-rules-v2",
+          semanticJudge: config.semanticJudge ? { provider: config.semanticJudge.provider, model: config.semanticJudge.model } : { enabled: false },
+        });
         sendJson(response, 202, evaluation);
         return;
       }
@@ -444,14 +471,82 @@ async function processCase(store: Database, userId: string, inspectionCase: Insp
       warnings.push("Some on-chain text was truncated to enforce evidence size limits.");
     }
     const bundle: EvidenceBundle = { network, target: inspectionCase.target, retrievedAt: new Date().toISOString(), provider: "tatum-sui-grpc", providerMethod, completeness, facts, untrustedText, warnings };
+    let verdict = detect(untrustedText, completeness);
+    if (config.semanticJudge && verdict.findings.length === 0) {
+      try {
+        const judged = await judgeUntrustedText(untrustedText, config.semanticJudge);
+        const findings = [...verdict.findings];
+        for (const finding of judged.findings) {
+          if (!findings.some((existing) => existing.category === finding.category && JSON.stringify(existing.evidence) === JSON.stringify(finding.evidence))) {
+            findings.push(finding);
+          }
+        }
+        verdict = {
+          ...verdict,
+          findings,
+          outcome: findings.length > 0 ? "signals_detected" : judged.complete && completeness === "complete" ? "no_signals_detected" : "uncertain",
+        };
+        if (!judged.complete) bundle.warnings.push("Semantic classification reviewed only bounded text; the assessment remains uncertain unless signals were detected.");
+      } catch {
+        bundle.warnings.push("Semantic classification was unavailable; no rule-only clean result is treated as conclusive.");
+        if (verdict.findings.length === 0) verdict = detect(untrustedText, "partial");
+      }
+    }
     await store.updateCaseStatus(userId, inspectionCase.id, "assessing", bundle);
-    await store.saveAssessment(userId, inspectionCase.id, detect(untrustedText, completeness));
+    const detectorVersion = config.semanticJudge
+      ? `baseline-rules-v2+${config.semanticJudge.provider}:${config.semanticJudge.model}`
+      : "baseline-rules-v2";
+    await store.saveAssessment(userId, inspectionCase.id, verdict, detectorVersion);
+    await persistAuthorizedThreatMemories(store, userId, inspectionCase.id, verdict, bundle);
   } catch {
     await store.updateCaseStatus(userId, inspectionCase.id, "failed", undefined, "evidence_provider_unavailable");
   } finally {
     client.close();
   }
   return (await store.getCase(userId, inspectionCase.id))!;
+}
+
+async function persistAuthorizedThreatMemories(
+  store: Database,
+  userId: string,
+  caseId: string,
+  verdict: Awaited<ReturnType<typeof detect>>,
+  evidence: EvidenceBundle,
+): Promise<void> {
+  if (!walrusMemory) return;
+  for (const finding of verdict.findings) {
+    const decision = authorizeMemoryWrite(finding, evidence);
+    if (!decision.allowed) continue;
+    let memoryId: string | undefined;
+    try {
+      const memory = await store.createThreatMemoryWrite(userId, caseId, decision.record);
+      memoryId = memory.id;
+      if (memory.status === "completed") continue;
+      const storedRecord = memory.normalizedRecord as typeof decision.record;
+      const result = await walrusMemory.store({ allowed: true, record: storedRecord });
+      await store.completeThreatMemoryWrite(userId, memory.id, result.job_id ?? result.id, result.blob_id);
+    } catch {
+      if (memoryId) {
+        try {
+          await store.failThreatMemoryWrite(userId, memoryId, "walrus_write_unavailable");
+        } catch {
+          // A later case retry can recover a write that the database could not update.
+        }
+      }
+    }
+  }
+}
+
+function evaluationJudgeConfig(detectorConfig: EvaluationDetectorConfig) {
+  const stored = detectorConfig.semanticJudge;
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return undefined;
+  const snapshot = stored as Record<string, unknown>;
+  if (snapshot.enabled === false) return undefined;
+  if (typeof snapshot.model !== "string") return undefined;
+  if (!config.semanticJudge || config.semanticJudge.provider !== snapshot.provider || config.semanticJudge.model !== snapshot.model) {
+    throw new Error("evaluation_config_unavailable");
+  }
+  return config.semanticJudge;
 }
 
 const server = createServer((request, response) => {
@@ -481,11 +576,18 @@ async function runQueueWorker(): Promise<void> {
     } else {
       const evaluation = await store.claimNextEvaluation();
       if (evaluation) {
+        let judgeConfig;
         try {
-          const metrics = runEvaluation(evaluation.evaluation.fixtureSetVersion);
+          judgeConfig = evaluationJudgeConfig(evaluation.evaluation.detectorConfig);
+        } catch {
+          await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_config_unavailable");
+          return;
+        }
+        try {
+          const metrics = await runEvaluation(evaluation.evaluation.fixtureSetVersion, judgeConfig);
           await store.completeEvaluation(evaluation.userId, evaluation.evaluation.id, metrics);
         } catch {
-          await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_failed");
+          await store.failEvaluation(evaluation.userId, evaluation.evaluation.id, "evaluation_unavailable");
         }
       }
     }

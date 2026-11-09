@@ -18,12 +18,12 @@ paths:
   /api/v1/health/ready:
     get:
       security: []
-      summary: Check configured integration readiness
+      summary: Check required integration readiness and optional provider status
       responses:
         '200':
-          description: All configured integrations are available.
+          description: All required integrations are available; optional integrations may be unconfigured.
         '503':
-          description: One or more integrations are unavailable or not configured.
+          description: One or more required integrations are unavailable or not configured.
   /api/v1/me:
     get:
       summary: Resolve the authenticated application user
@@ -180,7 +180,7 @@ paths:
               properties:
                 fixtureSetVersion:
                   type: string
-                  enum: [sieve-baseline-v1, sieve-heldout-v1, sieve-variants-v1, sieve-dev-v1, sieve-validation-v1]
+                  enum: [sieve-baseline-v1, sieve-heldout-v1, sieve-variants-v1, sieve-dev-v1, sieve-dev-v2, sieve-validation-v1, sieve-validation-v2]
       responses:
         '202':
           description: Evaluation was persisted and queued.

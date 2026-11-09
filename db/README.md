@@ -28,6 +28,8 @@ The example password is for local development only. Do not reuse it outside a lo
 
 ## Backup and restore rehearsal
 
+The local PostgreSQL 17 backup/restore rehearsal passed on 2026-11-05. See the [rehearsal record](rollback-rehearsal-2026-11-05.md) for scope and limits.
+
 Install the PostgreSQL client tools matching the server major version. Create a compressed, owner-only backup with `DATABASE_URL` set in the shell:
 
 ```sh

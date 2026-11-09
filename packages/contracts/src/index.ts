@@ -8,6 +8,7 @@ export type EvidencePointer = {
   digest?: string;
   objectId?: string;
   eventIndex?: number;
+  contentSha256?: string;
 };
 
 export type ChainFact = {

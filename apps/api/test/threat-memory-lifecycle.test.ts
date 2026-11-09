@@ -153,3 +153,18 @@ test("a reviewer must provide a rationale and valid state transition", () => {
     reason: "review_rationale_required",
   });
 });
+
+test("revoked validated memory remains structurally valid but is not recallable", () => {
+  const validated = reviewThreatMemory(memory(), "validate", workspaceReviewer, {
+    rationale: "Reviewed evidence and provenance for defensive use.",
+  }, now);
+  assert.equal(validated.ok, true);
+  if (!validated.ok) return;
+  const revoked = reviewThreatMemory(validated.memory, "revoke", workspaceReviewer, {
+    rationale: "Revoked after new information invalidated prior assumptions.",
+  }, now);
+  assert.equal(revoked.ok, true);
+  if (!revoked.ok) return;
+  assert.equal(parseThreatMemory(revoked.memory)?.status, "revoked");
+  assert.equal(canRecallThreatMemory(revoked.memory, { workspaceId: "ws_1", agentId: "agent_1", includeGlobal: false }, now), false);
+});

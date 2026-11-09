@@ -131,3 +131,6 @@ workspace, and global scope and can inspect inventory metadata for a written blo
 `end_epoch` and `expires_at`. Its contract tests use a mock SDK. The API does not yet
 cross-check recalled blob IDs against active PostgreSQL lifecycle records, so this
 adapter is not wired into decisions until that authorization seam is implemented.
+
+Validated records retain their review provenance after revocation or false-positive
+marking for audit purposes; terminal records remain excluded from recall.

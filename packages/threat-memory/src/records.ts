@@ -122,7 +122,8 @@ export function parseThreatMemory(value: unknown): ThreatMemory | null {
     };
   }
 
-  if ((value.status === "validated" || value.status === "active") !== (validation !== null)) return null;
+  if ((value.status === "candidate" && validation !== null) ||
+      ((value.status === "validated" || value.status === "active") && validation === null)) return null;
   return {
     id: value.id,
     schemaVersion: 1,

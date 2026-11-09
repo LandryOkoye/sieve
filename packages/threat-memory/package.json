@@ -6,7 +6,8 @@
   "exports": {
     "./policy": "./src/policy.ts",
     "./walrus": "./src/walrus.ts",
-    "./records": "./src/records.ts"
+    "./records": "./src/records.ts",
+    "./review": "./src/review.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

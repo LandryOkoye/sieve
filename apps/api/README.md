@@ -125,3 +125,9 @@ revocation, and request authentication through the database are still pending.
 
 Set `TEST_DATABASE_URL` to a disposable PostgreSQL database to run the optional
 agent credential and direct-inspection storage integration test.
+
+The Walrus lifecycle adapter now derives distinct namespace names for agent,
+workspace, and global scope and can inspect inventory metadata for a written blob's
+`end_epoch` and `expires_at`. Its contract tests use a mock SDK. The API does not yet
+cross-check recalled blob IDs against active PostgreSQL lifecycle records, so this
+adapter is not wired into decisions until that authorization seam is implemented.

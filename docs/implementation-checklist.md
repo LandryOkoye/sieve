@@ -23,7 +23,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 - [ ] Require an authenticated reviewer authorized for the record's scope to validate and separately promote a candidate. Persist reviewer identity, action, rationale, and timestamp.
 - [ ] Workspace reviewers can review only their workspace records. Agent-private records require the owning workspace's authorized reviewer. Cross-workspace reads and writes must fail closed.
 - [ ] Global promotion requires an explicitly configured global reviewer and documented privacy/provenance checks. Global records are read-only to workspace users and remain supporting evidence.
-- [ ] Use separate, deterministic Walrus namespaces for global, workspace, and agent scopes. Enforce authorization in PostgreSQL and the API as well: a namespace is not an onchain authorization boundary.
+- [ ] Use separate, deterministic Walrus namespaces for global, workspace, and agent scopes. Enforce authorization in PostgreSQL and the API as well: a namespace is not an onchain authorization boundary. (Namespace adapter exists; PostgreSQL-authoritative recall filter remains pending.)
 - [ ] Add tests proving that a candidate cannot influence recall, a rejected/revoked record cannot influence assessment, and cross-workspace memory is never returned.
 
 ## Walrus privacy, access, and retention
@@ -32,7 +32,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 - [ ] Do not treat blob IDs as secrets. Keep API and delegate keys server-side and out of logs, responses, memory records, and fixtures.
 - [ ] Verify the configured relayer, Walrus Memory SDK/relayer compatibility, owner/account, delegate authorization, namespace behavior, encryption mode, and live signed read/write behavior before marking the integration available.
 - [ ] The current locked MemWal SDK is 0.1.12. In its default relayer-backed mode, the relayer receives plaintext for embedding and encryption before Walrus upload; select this mode only for the minimized threat record and document the relayer trust assumption.
-- [ ] Track Walrus `blob_id`, write/index status, `end_epoch`/`expires_at` where exposed, and last successful reconciliation in PostgreSQL. Treat `remember()` acceptance as pending; wait for confirmed storage/indexing before reporting success.
+- [ ] Track Walrus `blob_id`, write/index status, `end_epoch`/`expires_at` where exposed, and last successful reconciliation in PostgreSQL. Treat `remember()` acceptance as pending; wait for confirmed storage/indexing before reporting success. (Adapter confirms with `rememberAndWait` and queries inventory; persistence/reconciliation remains pending.)
 - [ ] Verify renewal ownership and the supported renewal path. Do not promise automatic or permanent retention. The current SDK API exposes expiry metadata but no renewal method; until a verified renewal mechanism is implemented, surface expiry and operational remediation honestly.
 - [ ] Confirm deletion/forget behavior separately from blob expiry; do not claim a record is erased merely because its local metadata was revoked.
 

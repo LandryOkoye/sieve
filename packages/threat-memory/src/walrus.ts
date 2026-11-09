@@ -1,6 +1,9 @@
 import { MemWal } from "@mysten-incubation/memwal";
 import type { ThreatCategory } from "@sieve/detector";
 import type { MemoryWriteDecision, ThreatMemoryRecord } from "./policy.js";
+import { parseThreatMemory as parseLifecycleThreatMemory, type MemoryRecallScope, type ThreatMemory, type ThreatMemoryScope } from "./lifecycle.js";
+
+type MemWalClient = ReturnType<typeof MemWal.create>;
 
 export type WalrusMemoryConfig = {
   accountId: string;
@@ -20,6 +23,24 @@ export type ThreatMemoryRecall = {
   records: RecalledThreatMemory[];
   rejected: Array<{ blobId: string; reason: "invalid_record_schema" }>;
 };
+
+export type LifecycleMemoryHit = {
+  memory: ThreatMemory;
+  blobId: string;
+  distance: number;
+  namespace: string;
+};
+
+export type WalrusBlobMetadata = { endEpoch: number | null; expiresAt: string | null };
+
+export async function namespaceForThreatScope(base: string, scope: ThreatMemoryScope): Promise<string> {
+  if (!/^[a-zA-Z0-9._-]{1,120}$/.test(base)) throw new Error("invalid_walrus_namespace");
+  if (scope.kind === "global") return `${base}-v1-global`;
+  const source = scope.kind === "workspace" ? `workspace:${scope.workspaceId}` : `agent:${scope.workspaceId}:${scope.agentId}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+  const suffix = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  return `${base}-v1-${scope.kind}-${suffix}`;
+}
 
 const categories = new Set<ThreatCategory>([
   "instruction_override",
@@ -115,11 +136,11 @@ function parseThreatMemory(value: unknown): ThreatMemoryRecord | undefined {
 
 export class WalrusThreatMemory {
   private readonly namespace: string;
-  private readonly client: ReturnType<typeof MemWal.create>;
+  private readonly client: MemWalClient;
 
-  constructor(config: WalrusMemoryConfig) {
+  constructor(config: WalrusMemoryConfig, client?: MemWalClient) {
     this.namespace = config.namespace;
-    this.client = MemWal.create({
+    this.client = client ?? MemWal.create({
       key: config.delegateKey,
       accountId: config.accountId,
       serverUrl: config.serverUrl,
@@ -168,5 +189,50 @@ export class WalrusThreatMemory {
     }
 
     return { records, rejected };
+  }
+
+  async storeLifecycleRecord(record: ThreatMemory): Promise<{ jobId: string; blobId: string; namespace: string; metadata: WalrusBlobMetadata | null }> {
+    const namespace = await namespaceForThreatScope(this.namespace, record.scope);
+    const result = await this.client.rememberAndWait(JSON.stringify(record), namespace, { dedupe: true });
+    const metadata = await this.findBlobMetadata(result.blob_id, namespace);
+    return { jobId: result.job_id ?? result.id, blobId: result.blob_id, namespace, metadata };
+  }
+
+  async recallLifecycleRecords(query: string, scope: MemoryRecallScope, limit = 8): Promise<LifecycleMemoryHit[]> {
+    if (!query.trim() || query.length > 512) throw new Error("invalid_walrus_recall_query");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new Error("invalid_walrus_recall_limit");
+    const scopes: ThreatMemoryScope[] = [
+      { kind: "agent", workspaceId: scope.workspaceId, agentId: scope.agentId },
+      { kind: "workspace", workspaceId: scope.workspaceId },
+      ...(scope.includeGlobal ? [{ kind: "global" } as const] : []),
+    ];
+    const results = await Promise.all(scopes.map(async (memoryScope) => {
+      const namespace = await namespaceForThreatScope(this.namespace, memoryScope);
+      const recalled = await this.client.recall({ query, limit, namespace });
+      return recalled.results.flatMap((item) => {
+        try {
+          const memory = parseLifecycleThreatMemory(JSON.parse(item.text));
+          return memory ? [{ memory, blobId: item.blob_id, distance: item.distance, namespace }] : [];
+        } catch {
+          return [];
+        }
+      });
+    }));
+    return results.flat().sort((left, right) => left.distance - right.distance).slice(0, limit);
+  }
+
+  private async findBlobMetadata(blobId: string, namespace: string): Promise<WalrusBlobMetadata | null> {
+    let cursor: string | undefined;
+    for (let page = 0; page < 20; page += 1) {
+      const inventory = await this.client.listMemories({ namespace, limit: 500, ...(cursor ? { cursor } : {}) });
+      const match = inventory.memories.find((memory) => memory.blob_id === blobId);
+      if (match) return {
+        endEpoch: Number.isInteger(match.end_epoch) ? match.end_epoch : null,
+        expiresAt: typeof match.expires_at === "string" && Number.isFinite(Date.parse(match.expires_at)) ? match.expires_at : null,
+      };
+      if (!inventory.has_more || !inventory.next_cursor) break;
+      cursor = inventory.next_cursor;
+    }
+    return null;
   }
 }

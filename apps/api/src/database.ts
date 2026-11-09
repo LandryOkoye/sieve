@@ -5,6 +5,42 @@ import { Pool } from "pg";
 import type { DetectorVerdict, EvaluationDetectorConfig, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
 import { applyEvaluationThresholds } from "@sieve/evaluation";
 import type { ThreatMemoryRecord } from "@sieve/threat-memory/policy";
+import type { InspectionAction } from "./inspection.js";
+
+export type ProtectedAgent = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  policy: Record<string, unknown>;
+  policyVersion: number;
+};
+
+export type DirectInspectionInput = {
+  agentId: string;
+  workspaceId: string;
+  requestId: string;
+  contentHash: string;
+  contentBytes: number;
+  sourceType: string;
+  sourceRefHash: string | null;
+  outcome: DetectorVerdict["outcome"];
+  action: InspectionAction;
+  findings: DetectorVerdict["findings"];
+  memoryIds: string[];
+  detectorVersion: string;
+  policyVersion: number;
+};
+
+export type StoredDirectInspection = {
+  id: string;
+  contentHash: string;
+  outcome: DetectorVerdict["outcome"];
+  action: InspectionAction;
+  findings: DetectorVerdict["findings"];
+  memoryIds: string[];
+  createdAt: string;
+  expiresAt: string;
+};
 
 const migrationsDirectory = new URL("../../../db/migrations/", import.meta.url);
 
@@ -39,6 +75,99 @@ export class Database {
     const user = result.rows[0];
     if (!user) throw new Error("Could not resolve application user");
     return user.id;
+  }
+
+  async createProtectedAgent(userId: string, name: string, credential: { id: string; tokenHash: string; prefix: string }): Promise<ProtectedAgent> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM app_users WHERE id = $1 FOR UPDATE", [userId]);
+      let workspace = await client.query<{ id: string }>(
+        `SELECT w.id FROM workspaces w JOIN workspace_members m ON m.workspace_id = w.id
+         WHERE m.user_id = $1 AND m.role = 'owner' ORDER BY w.created_at LIMIT 1`, [userId],
+      );
+      let workspaceId = workspace.rows[0]?.id;
+      if (!workspaceId) {
+        workspaceId = randomUUID();
+        await client.query("INSERT INTO workspaces (id, owner_user_id, name) VALUES ($1, $2, 'Default workspace')", [workspaceId, userId]);
+        await client.query("INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, 'owner')", [workspaceId, userId]);
+      }
+      const agentId = randomUUID();
+      const result = await client.query<{ policy: unknown; policy_version: number }>(
+        `INSERT INTO protected_agents (id, workspace_id, name) VALUES ($1, $2, $3)
+         RETURNING policy, policy_version`, [agentId, workspaceId, name],
+      );
+      await client.query(
+        `INSERT INTO agent_credentials (id, workspace_id, agent_id, token_hash, token_prefix, scopes)
+         VALUES ($1, $2, $3, $4, $5, ARRAY['inspect'])`,
+        [credential.id, workspaceId, agentId, credential.tokenHash, credential.prefix],
+      );
+      await client.query(
+        `INSERT INTO agent_audit_events (id, workspace_id, agent_id, actor_user_id, event_type)
+         VALUES ($1, $2, $3, $4, 'agent.created')`, [randomUUID(), workspaceId, agentId, userId],
+      );
+      await client.query("COMMIT");
+      return { id: agentId, workspaceId, name, policy: asJsonObject(result.rows[0]?.policy), policyVersion: result.rows[0]?.policy_version ?? 1 };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async authenticateAgent(tokenHash: string, requiredScope: string): Promise<ProtectedAgent | null> {
+    const result = await this.pool.query<{ id: string; workspace_id: string; name: string; policy: unknown; policy_version: number }>(
+      `UPDATE agent_credentials c SET last_used_at = now()
+       FROM protected_agents a
+       WHERE c.agent_id = a.id AND c.token_hash = $1 AND c.revoked_at IS NULL
+         AND (c.expires_at IS NULL OR c.expires_at > now()) AND c.scopes @> ARRAY[$2]::text[] AND a.status = 'active'
+       RETURNING a.id, a.workspace_id, a.name, a.policy, a.policy_version`, [tokenHash, requiredScope],
+    );
+    const row = result.rows[0];
+    return row ? { id: row.id, workspaceId: row.workspace_id, name: row.name, policy: asJsonObject(row.policy), policyVersion: row.policy_version } : null;
+  }
+
+  async saveDirectInspection(input: DirectInspectionInput): Promise<{ inspection: StoredDirectInspection; created: boolean } | { conflict: true }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const insert = await client.query(
+        `INSERT INTO direct_inspections
+         (id, workspace_id, agent_id, request_id, content_sha256, content_bytes, source_type, source_ref_hash,
+          outcome, action, findings, memory_ids, detector_version, policy_version)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12::jsonb,$13,$14)
+         ON CONFLICT (agent_id, request_id) DO NOTHING`,
+        [randomUUID(), input.workspaceId, input.agentId, input.requestId, input.contentHash, input.contentBytes,
+          input.sourceType, input.sourceRefHash, input.outcome, input.action, JSON.stringify(input.findings),
+          JSON.stringify(input.memoryIds), input.detectorVersion, input.policyVersion],
+      );
+      const result = await client.query<DirectInspectionRow>(
+        `SELECT id, content_sha256, outcome, action, findings, memory_ids, detector_version, policy_version,
+          content_bytes, source_type, source_ref_hash, created_at, expires_at
+         FROM direct_inspections WHERE agent_id = $1 AND request_id = $2 FOR UPDATE`, [input.agentId, input.requestId],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("Could not load direct inspection record");
+      if (row.content_sha256 !== input.contentHash || row.content_bytes !== input.contentBytes || row.source_type !== input.sourceType ||
+          row.source_ref_hash !== input.sourceRefHash || row.detector_version !== input.detectorVersion || row.policy_version !== input.policyVersion) {
+        await client.query("ROLLBACK");
+        return { conflict: true };
+      }
+      if (insert.rowCount === 1) {
+        await client.query(
+          `INSERT INTO agent_audit_events (id, workspace_id, agent_id, inspection_id, event_type)
+           VALUES ($1,$2,$3,$4,'inspection.completed')`, [randomUUID(), input.workspaceId, input.agentId, row.id],
+        );
+      }
+      await client.query("COMMIT");
+      return { inspection: toDirectInspection(row), created: insert.rowCount === 1 };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async createCase(userId: string, network: SuiNetwork, target: LookupTarget, idempotencyKey: string | undefined): Promise<{ inspectionCase: InspectionCase; created: boolean }> {
@@ -351,6 +480,22 @@ type CaseRow = {
   status: InspectionCase["status"]; evidence: EvidenceBundle | null; failure_code: string | null; created_at: Date; updated_at: Date; assessment: DetectorVerdict | null;
 };
 
+type DirectInspectionRow = {
+  id: string;
+  content_sha256: string;
+  outcome: DetectorVerdict["outcome"];
+  action: InspectionAction;
+  findings: DetectorVerdict["findings"];
+  memory_ids: unknown;
+  detector_version: string;
+  policy_version: number;
+  content_bytes: number;
+  source_type: string;
+  source_ref_hash: string | null;
+  created_at: Date;
+  expires_at: Date;
+};
+
 type EvaluationRow = {
   id: string;
   status: EvaluationRun["status"];
@@ -423,6 +568,23 @@ function toThreatMemoryWrite(row: ThreatMemoryRow): ThreatMemoryWrite {
     failureCode: row.failure_code,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+function asJsonObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function toDirectInspection(row: DirectInspectionRow): StoredDirectInspection {
+  return {
+    id: row.id,
+    contentHash: row.content_sha256,
+    outcome: row.outcome,
+    action: row.action,
+    findings: Array.isArray(row.findings) ? row.findings : [],
+    memoryIds: Array.isArray(row.memory_ids) ? row.memory_ids.filter((id): id is string => typeof id === "string") : [],
+    createdAt: row.created_at.toISOString(),
+    expiresAt: row.expires_at.toISOString(),
   };
 }
 

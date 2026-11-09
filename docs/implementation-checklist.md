@@ -4,7 +4,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 
 ## Runtime inspection order
 
-- [ ] Authenticate the external agent with a scoped, revocable credential and resolve its workspace, agent, policy, limits, and permitted memory scopes. (Schema foundation added in migration 0002; API flow pending.)
+- [ ] Authenticate the external agent with a scoped, revocable credential and resolve its workspace, agent, policy, limits, and permitted memory scopes. (Schema and hash-only credential primitive added; provisioning and request authentication pending.)
 - [ ] Validate and normalize the request. Direct content must be inspectable without Tatum. Preserve source provenance and correlation ID without requiring a private system prompt or conversation.
 - [ ] Run initial deterministic detection before the final assessment. Record findings, evidence spans, detector version, and incomplete coverage.
 - [ ] Derive a minimized retrieval query from detector features. Do not send submitted raw content, hidden prompts, conversation history, credentials, or sensitive context to Walrus.

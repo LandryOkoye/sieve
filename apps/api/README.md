@@ -113,3 +113,7 @@ inspection, validates active Walrus-shaped memory records against scope and expi
 then performs optional contextual review before choosing allow, review, or block.
 This seam is not yet exposed as the developer HTTP endpoint; API-key provisioning,
 durable inspection records, and the TypeScript SDK remain implementation work.
+
+Agent credential primitives now issue 256-bit `sieve_live_` secrets, expose the
+secret only at issuance, and derive a SHA-256 verifier for persistence. Provisioning,
+revocation, and request authentication through the database are still pending.

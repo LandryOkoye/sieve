@@ -4,7 +4,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 
 ## Runtime inspection order
 
-- [ ] Authenticate the external agent with a scoped, revocable credential and resolve its workspace, agent, policy, limits, and permitted memory scopes.
+- [ ] Authenticate the external agent with a scoped, revocable credential and resolve its workspace, agent, policy, limits, and permitted memory scopes. (Schema foundation added in migration 0002; API flow pending.)
 - [ ] Validate and normalize the request. Direct content must be inspectable without Tatum. Preserve source provenance and correlation ID without requiring a private system prompt or conversation.
 - [ ] Run initial deterministic detection before the final assessment. Record findings, evidence spans, detector version, and incomplete coverage.
 - [ ] Derive a minimized retrieval query from detector features. Do not send submitted raw content, hidden prompts, conversation history, credentials, or sensitive context to Walrus.
@@ -59,7 +59,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 
 1. Baseline the `core` branch, dependencies, database, migrations, and current API behavior; preserve the frontend worker's files.
 2. Record architecture and checklist updates; agree the versioned inspection contract with the frontend owner.
-3. Extend PostgreSQL for workspaces, protected agents, scoped credentials, policies, general inspections, memory lifecycle/review, memory operations, and audit events through additive migrations.
+3. Extend PostgreSQL for workspaces, protected agents, scoped credentials, policies, general inspections, memory lifecycle/review, memory operations, and audit events through additive migrations. (Migration 0002 added; storage methods and integration verification pending.)
 4. Add tested direct-content inspection and policy behavior independent of Tatum.
 5. Add validated memory recall before final assessment, then controlled candidate write/review/promotion and real Walrus restart verification.
 6. Add TypeScript SDK and the enforcement example; integrate UI only after locating and coordinating its source.

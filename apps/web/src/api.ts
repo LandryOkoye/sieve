@@ -85,7 +85,7 @@ export const api = {
 
 export function readableApiError(error: unknown): string {
   if (!(error instanceof ApiError)) return 'The API could not be reached. Check that the service is running and try again.'
-  if (error.status === 401) return 'Your session has expired. Connect again with a valid access token.'
+  if (error.status === 401) return 'Your Google session has expired. Sign in again.'
   if (error.status === 503 && error.code === 'authentication_not_configured') return 'Authentication is not configured on this API.'
   if (error.status === 503) return 'A required service is unavailable. The operation may still be saved; refresh to check its status.'
   if (error.status === 503) return 'A required service is unavailable. Your case is saved and can be retried.'

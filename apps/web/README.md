@@ -12,9 +12,19 @@ pnpm --filter @sieve/web dev
 
 Vite proxies `/api` requests to `http://localhost:3001`. Set `VITE_API_BASE_URL` when the API is hosted on a different origin. The API must allow browser requests from that origin in deployed environments.
 
-The connect screen supports OIDC authorization-code sign-in with PKCE. Configure a public SPA client in your identity provider and allow `http://localhost:5173/` as a redirect URI. The app verifies the ID token signature, issuer, audience, and nonce before sending its access token to the API. Tokens stay in this tab's `sessionStorage` and are removed when you disconnect. Manual bearer-token entry is available only in Vite development mode.
+The connect screen uses Google's official Sign in with Google button. It sends Google's ID token to the API as a bearer token; the API validates its signature, issuer, expiry, and audience before creating the SIEVE user session. The ID token stays in this tab's `sessionStorage` and is removed when you disconnect.
 
-Copy `apps/web/.env.example` to `apps/web/.env.local` and set `VITE_OIDC_ISSUER` and `VITE_OIDC_CLIENT_ID`. The issuer must exactly match the API's `AUTH_ISSUER`. Configure `AUTH_AUDIENCE` on the API to match the access token; set `VITE_OIDC_AUDIENCE` when your provider requires an audience parameter in the authorization request. No client secret belongs in the browser app. The identity provider must allow discovery, JWKS, and token-exchange requests from the browser origin.
+Create an OAuth client of type **Web application** in Google Cloud. Add `http://localhost:5173` as an authorized JavaScript origin. Copy `apps/web/.env.example` to `apps/web/.env.local` and set `VITE_GOOGLE_CLIENT_ID` to the client ID. No client secret is used by the browser or API for this ID-token flow.
+
+Set these API values in the project root `.env` file. Docker Compose reads this file automatically; when running the API directly, export its variables into the shell before starting it:
+
+```env
+AUTH_ISSUER=https://accounts.google.com
+AUTH_AUDIENCE=your-web-client-id.apps.googleusercontent.com
+AUTH_JWKS_URL=https://www.googleapis.com/oauth2/v3/certs
+```
+
+Use the same OAuth client ID for `VITE_GOOGLE_CLIENT_ID` and `AUTH_AUDIENCE`. The API validates Google ID-token signatures using Google's public signing keys and scopes records by the verified issuer and subject. Restart Vite and the API after configuring these values. Add the staging site's origin as an authorized JavaScript origin before staging sign-in.
 
 ## Available views
 

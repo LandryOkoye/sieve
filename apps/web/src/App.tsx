@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import type { DetectorVerdict, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
 import { api, readableApiError, type Health } from './api'
-import { beginOidcLogin, completeOidcCallback, hasOidcCallback, oidcLoginConfigured } from './oidc'
+import { renderGoogleSignInButton } from './google-auth'
 import './App.css'
 
 type Page = { name: 'overview' | 'inspect' | 'memory' | 'evaluations' | 'settings' | 'case'; caseId?: string }
 type NavName = Exclude<Page['name'], 'case'>
+const googleIdTokenStorageKey = 'sieve_google_id_token'
 
 const navItems: { name: NavName; label: string; icon: string }[] = [
   { name: 'overview', label: 'Overview', icon: 'grid' },
@@ -79,26 +80,40 @@ function LoadingScreen() {
   return <main className="auth-screen"><div className="auth-mark"><span className="brand-mark">S</span><span>SIEVE</span></div><div className="auth-card auth-loading"><span className="spinner" /><p>Checking your session…</p></div></main>
 }
 
-function ConnectScreen({ onConnect, onLogin, oidcEnabled, allowManualToken, message }: {
-  onConnect: (value: string) => Promise<void>
-  onLogin: () => Promise<void>
-  oidcEnabled: boolean
-  allowManualToken: boolean
+function GoogleSignInButton({ clientId, onCredential, onError }: {
+  clientId: string
+  onCredential: (idToken: string) => Promise<void>
+  onError: (error: Error) => void
+}) {
+  const button = useRef<HTMLDivElement>(null)
+  const callbacks = useRef({ onCredential, onError })
+  callbacks.current = { onCredential, onError }
+
+  useEffect(() => {
+    const container = button.current
+    if (!container) return
+    return renderGoogleSignInButton(
+      container,
+      clientId,
+      (idToken) => callbacks.current.onCredential(idToken),
+      (error) => callbacks.current.onError(error),
+    )
+  }, [clientId])
+
+  return <div ref={button} className="google-signin-button" aria-label="Sign in with Google" />
+}
+
+function ConnectScreen({ onConnect, clientId, message }: {
+  onConnect: (idToken: string) => Promise<void>
+  clientId?: string
   message: string
 }) {
-  const [accessToken, setAccessToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  async function submit(event: FormEvent) {
-    event.preventDefault()
+  async function acceptGoogleCredential(idToken: string) {
     setBusy(true)
     setError('')
-    try { await onConnect(accessToken.trim()) } catch (cause) { setError(readableApiError(cause)) } finally { setBusy(false) }
-  }
-  async function startLogin() {
-    setBusy(true)
-    setError('')
-    try { await onLogin() } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not start secure sign-in.') } finally { setBusy(false) }
+    try { await onConnect(idToken) } catch (cause) { setError(readableApiError(cause)) } finally { setBusy(false) }
   }
   return <main className="auth-screen">
     <div className="auth-orbit orbit-one" /><div className="auth-orbit orbit-two" />
@@ -107,28 +122,26 @@ function ConnectScreen({ onConnect, onLogin, oidcEnabled, allowManualToken, mess
       <div className="auth-icon"><Icon name="lock" size={21} /></div>
       <p className="eyebrow">SECURE WORKSPACE</p>
       <h1>Connect to SIEVE</h1>
-      <p className="auth-copy">Sign in with your SIEVE identity provider to open your inspection workspace.</p>
-      {oidcEnabled && <button className="button button-primary button-wide oidc-login" type="button" onClick={() => void startLogin()} disabled={busy}>
-        {busy ? <><span className="spinner spinner-small" /> Redirecting…</> : <>Sign in securely <Icon name="arrow" size={16} /></>}
-      </button>}
-      {oidcEnabled && allowManualToken && <div className="auth-divider"><span>developer token</span></div>}
-      {allowManualToken && <form onSubmit={submit} className="connect-form">
-        <label htmlFor="access-token">Access token</label>
-        <input id="access-token" type="password" autoComplete="current-password" spellCheck={false} value={accessToken} onChange={(event) => setAccessToken(event.target.value)} placeholder="Paste a local bearer token" required />
-        <button className="button button-secondary button-wide" disabled={busy || !accessToken.trim()}>{busy ? <><span className="spinner spinner-small" /> Connecting…</> : <>Connect with token <Icon name="arrow" size={16} /></>}</button>
-      </form>}
-      {!oidcEnabled && !allowManualToken && <p className="inline-error" role="status">Sign-in is not configured for this deployment.</p>}
+      <p className="auth-copy">Sign in with your Google account to open your inspection workspace.</p>
+      {clientId
+        ? <div className={busy ? 'google-signin-wrap is-busy' : 'google-signin-wrap'} aria-busy={busy}>
+          <GoogleSignInButton clientId={clientId} onCredential={acceptGoogleCredential} onError={(signInError) => setError(signInError.message)} />
+        </div>
+        : <p className="inline-error" role="status">Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID for the web app.</p>}
       {error && <div className="inline-error" role="alert">{error}</div>}
       {message && <div className="inline-error" role="status">{message}</div>}
-      <p className="auth-footnote"><Icon name="lock" size={13} /> Token stays in this browser tab and is cleared when you disconnect.</p>
+      <p className="auth-footnote"><Icon name="lock" size={13} /> SIEVE validates your Google identity on the server.</p>
     </section>
     <p className="auth-bottom">Read-only access · Sui mainnet and testnet</p>
   </main>
 }
 
 function App() {
-  const [token, setToken] = useState(() => sessionStorage.getItem('sieve_access_token') ?? '')
-  const [authState, setAuthState] = useState<'checking' | 'connected' | 'disconnected'>(() => hasOidcCallback() || sessionStorage.getItem('sieve_access_token') ? 'checking' : 'disconnected')
+  const [token, setToken] = useState(() => {
+    sessionStorage.removeItem('sieve_access_token')
+    return sessionStorage.getItem(googleIdTokenStorageKey) ?? ''
+  })
+  const [authState, setAuthState] = useState<'checking' | 'connected' | 'disconnected'>(() => sessionStorage.getItem(googleIdTokenStorageKey) ? 'checking' : 'disconnected')
   const [userId, setUserId] = useState('')
   const [page, setPage] = useState<Page>(pageFromHash)
   const [cases, setCases] = useState<InspectionCase[]>([])
@@ -148,21 +161,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!hasOidcCallback()) return
-    let alive = true
-    completeOidcCallback().then((accessToken) => {
-      if (!alive || !accessToken) return
-      sessionStorage.setItem('sieve_access_token', accessToken)
-      setToken(accessToken)
-    }).catch((error: unknown) => {
-      if (!alive) return
-      setGlobalError(error instanceof Error ? error.message : 'Sign-in could not be completed.')
-      setAuthState('disconnected')
-    })
-    return () => { alive = false }
-  }, [])
-
-  useEffect(() => {
     let alive = true
     if (!token) return
     api.me(token).then((identity) => {
@@ -173,7 +171,7 @@ function App() {
     }).catch((error: unknown) => {
       if (!alive) return
       if (error instanceof Error && 'status' in error && error.status === 401) {
-        sessionStorage.removeItem('sieve_access_token')
+        sessionStorage.removeItem(googleIdTokenStorageKey)
         setToken('')
       } else setGlobalError(readableApiError(error))
       setAuthState('disconnected')
@@ -236,18 +234,18 @@ function App() {
     else window.location.hash = hash
   }
 
-  async function connect(accessToken: string) {
-    const identity = await api.me(accessToken)
-    sessionStorage.setItem('sieve_access_token', accessToken)
+  async function connect(idToken: string) {
+    const identity = await api.me(idToken)
+    sessionStorage.setItem(googleIdTokenStorageKey, idToken)
     setUserId(identity.userId)
     setGlobalError('')
-    setToken(accessToken)
+    setToken(idToken)
     setAuthState('connected')
     setLoadingCases(true)
   }
 
   function disconnect() {
-    sessionStorage.removeItem('sieve_access_token')
+    sessionStorage.removeItem(googleIdTokenStorageKey)
     setToken('')
     setUserId('')
     setCases([])
@@ -279,7 +277,7 @@ function App() {
   }
 
   if (authState === 'checking') return <LoadingScreen />
-  if (authState === 'disconnected') return <ConnectScreen onConnect={connect} onLogin={beginOidcLogin} oidcEnabled={oidcLoginConfigured()} allowManualToken={import.meta.env.DEV} message={globalError} />
+  if (authState === 'disconnected') return <ConnectScreen onConnect={connect} clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() || undefined} message={globalError} />
 
   const pageTitle = page.name === 'case' ? 'Inspection detail' : ({ overview: 'Overview', inspect: 'Inspect evidence', memory: 'Threat memory', evaluations: 'Evaluations', settings: 'Settings' } as Record<string, string>)[page.name]
   return <div className="app-shell">
@@ -357,7 +355,7 @@ function InspectPage({ onCreated }: { onCreated: (record: InspectionCase) => voi
     setBusy(true)
     setError('')
     try {
-      const result = await api.createCase(sessionStorage.getItem('sieve_access_token') ?? '', network, targetType === 'object' ? { objectId: identifier.trim() } : { digest: identifier.trim() })
+      const result = await api.createCase(sessionStorage.getItem(googleIdTokenStorageKey) ?? '', network, targetType === 'object' ? { objectId: identifier.trim() } : { digest: identifier.trim() })
       onCreated(result)
     } catch (cause) { setError(readableApiError(cause)) } finally { setBusy(false) }
   }

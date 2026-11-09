@@ -110,11 +110,14 @@ threshold acceptance reporting.
 
 When `METRICS_BEARER_TOKEN` is configured, `GET /metrics` returns Prometheus text metrics for process uptime and memory, background-worker activity, and completed HTTP request counts by bounded route, method, and status. Scrape it with `Authorization: Bearer <token>`. The endpoint returns `404` when metrics are disabled and never emits request query strings, identifiers, or credentials. Keep the token in the deployment's secret store.
 
-The backend also has a tested direct-content assessment seam that runs deterministic
-inspection, validates active Walrus-shaped memory records against scope and expiry,
-then performs optional contextual review before choosing allow, review, or block.
-This seam is not yet exposed as the developer HTTP endpoint; API-key provisioning,
-durable inspection records, and the TypeScript SDK remain implementation work.
+Authenticated developers can provision an agent with `POST /api/v1/agents`; the
+`SIEVE agent credential` is returned once and only its SHA-256 verifier is stored.
+The agent submits direct text to `POST /api/v1/agent/inspect` with that credential
+and an `Idempotency-Key`. The route performs source-independent inspection, persists
+a content hash, findings, policy version, and decision, and returns `allow`, `review`,
+or `block` before the caller places content in trusted context. Raw inspected content
+and source references are not persisted. The TypeScript SDK and enforcement example
+remain pending. The route does not yet recall or write new lifecycle records to Walrus.
 
 Agent credential primitives now issue 256-bit `sieve_live_` secrets, expose the
 secret only at issuance, and derive a SHA-256 verifier for persistence. Provisioning,

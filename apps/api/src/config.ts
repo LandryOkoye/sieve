@@ -1,5 +1,6 @@
 import type { OidcConfig } from "./auth.js";
 import type { SemanticJudgeConfig } from "@sieve/detector";
+import type { WalrusMemoryConfig } from "@sieve/threat-memory/walrus";
 
 export type IntegrationStatus = "available" | "unavailable" | "unverified" | "not_configured";
 
@@ -9,6 +10,7 @@ export type ApiConfig = {
   tatumApiKey: string | undefined;
   metricsBearerToken: string | undefined;
   semanticJudge: SemanticJudgeConfig | undefined;
+  walrusMemory: WalrusMemoryConfig | undefined;
   suiNetwork: "mainnet" | "testnet";
   auth: OidcConfig | undefined;
   integrations: {
@@ -106,6 +108,25 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
       throw new Error("MEMWAL_SERVER_URL must use HTTP or HTTPS");
     }
   }
+  const walrusAccountId = environment.MEMWAL_ACCOUNT_ID;
+  const walrusDelegateKey = environment.MEMWAL_PRIVATE_KEY;
+  if (Boolean(walrusAccountId) !== Boolean(walrusDelegateKey)) {
+    throw new Error("MEMWAL_ACCOUNT_ID and MEMWAL_PRIVATE_KEY must be configured together");
+  }
+  const walrusNamespace = environment.MEMWAL_NAMESPACE?.trim() || "sieve-threat-memory";
+  if (walrusNamespace.length > 255 || /[\u0000-\u001f]/.test(walrusNamespace)) {
+    throw new Error("MEMWAL_NAMESPACE must be at most 255 characters and contain no control characters");
+  }
+  const walrusMemory = walrusAccountId && walrusDelegateKey
+    ? {
+        accountId: walrusAccountId,
+        delegateKey: walrusDelegateKey,
+        serverUrl: walrusServerUrl || (network === "mainnet"
+          ? "https://relayer.memory.walrus.xyz"
+          : "https://relayer-staging.memory.walrus.xyz"),
+        namespace: walrusNamespace,
+      }
+    : undefined;
 
   const oidcIssuer = environment.AUTH_ISSUER;
   const oidcAudience = environment.AUTH_AUDIENCE;
@@ -132,15 +153,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     tatumApiKey: environment.TATUM_API_KEY,
     metricsBearerToken,
     semanticJudge,
+    walrusMemory,
     suiNetwork: network,
     auth,
     integrations: {
       database: integrationStatus(Boolean(environment.DATABASE_URL)),
       authentication: integrationStatus(Boolean(auth)),
       tatum: integrationStatus(Boolean(environment.TATUM_API_KEY)),
-      walrusMemory: integrationStatus(
-        Boolean(environment.MEMWAL_ACCOUNT_ID && environment.MEMWAL_PRIVATE_KEY),
-      ),
+      walrusMemory: integrationStatus(Boolean(walrusMemory)),
       semanticJudge: integrationStatus(Boolean(semanticJudge)),
     },
   };

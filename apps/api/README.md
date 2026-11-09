@@ -11,8 +11,8 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `TATUM_NETWORK` | `testnet` (default) or `mainnet` |
 | `MEMWAL_ACCOUNT_ID` | Walrus Memory account used by SIEVE |
 | `MEMWAL_PRIVATE_KEY` | Delegate key for the SIEVE API; keep it server-side |
-| `MEMWAL_SERVER_URL` | Optional Walrus Memory relayer URL |
-| `MEMWAL_NAMESPACE` | Optional namespace for SIEVE threat memories |
+| `MEMWAL_SERVER_URL` | Optional Walrus Memory relayer URL; defaults to the relayer for `TATUM_NETWORK` |
+| `MEMWAL_NAMESPACE` | Optional namespace for SIEVE threat memories; defaults to `sieve-threat-memory` |
 | `AUTH_ISSUER` | OIDC issuer URL for API access tokens |
 | `AUTH_AUDIENCE` | Expected audience claim for API access tokens |
 | `AUTH_JWKS_URL` | HTTPS URL for the issuer's signing keys |
@@ -35,9 +35,17 @@ the API does not set HSTS because TLS termination belongs to that boundary.
 
 The liveness route reports whether the process is running. Readiness applies
 the SQL migrations and checks PostgreSQL when `DATABASE_URL` is configured.
-Tatum and Walrus are reported as `unverified` until their connection checks are
-wired in; configured values are never reported as a successful connection by
-presence alone.
+When configured, Tatum and Walrus readiness performs live provider health
+checks; credentials being present alone never reports a successful connection.
+
+The API writes a normalized threat-memory record only when the write policy
+accepts a strong detector signal backed by complete Tatum evidence. The original
+chain text is not sent to Walrus. The record is saved to PostgreSQL before the
+SDK call, and `rememberAndWait` uses content deduplication so retries do not
+create duplicate memories. Failed writes remain visible in the user's memory
+history and are retried when the case is retried. The SDK validates recalled
+records and marks them untrusted; the API does not yet use recalls in case
+assessments.
 
 ## Local container deployment
 

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
 import type { DetectorVerdict, EvaluationDetectorConfig, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
 import { applyEvaluationThresholds } from "@sieve/evaluation";
+import type { ThreatMemoryRecord } from "@sieve/threat-memory/policy";
 
 const migrationsDirectory = new URL("../../../db/migrations/", import.meta.url);
 
@@ -137,6 +138,52 @@ export class Database {
       [userId, memoryId],
     );
     return result.rows[0] ? toThreatMemoryWrite(result.rows[0]) : null;
+  }
+
+  async createThreatMemoryWrite(userId: string, caseId: string, record: ThreatMemoryRecord): Promise<ThreatMemoryWrite> {
+    await this.pool.query(
+      `INSERT INTO threat_memory_writes (id, user_id, case_id, pattern, status, normalized_record)
+       VALUES ($1, $2, $3, $4, 'pending', $5::jsonb)
+       ON CONFLICT (case_id, pattern) DO NOTHING`,
+      [randomUUID(), userId, caseId, record.pattern, JSON.stringify(record)],
+    );
+    let result = await this.pool.query<ThreatMemoryRow>(
+      `${threatMemorySelect} WHERE user_id = $1 AND case_id = $2 AND pattern = $3`,
+      [userId, caseId, record.pattern],
+    );
+    let row = result.rows[0];
+    if (!row) throw new Error("Could not create or load threat memory write");
+    if (row.status === "failed") {
+      await this.pool.query(
+        `UPDATE threat_memory_writes SET status = 'pending', failure_code = NULL, updated_at = now()
+         WHERE id = $1 AND user_id = $2 AND status = 'failed'`,
+        [row.id, userId],
+      );
+      result = await this.pool.query<ThreatMemoryRow>(
+        `${threatMemorySelect} WHERE user_id = $1 AND id = $2`,
+        [userId, row.id],
+      );
+      row = result.rows[0];
+    }
+    if (!row) throw new Error("Could not load threat memory write");
+    return toThreatMemoryWrite(row);
+  }
+
+  async completeThreatMemoryWrite(userId: string, memoryId: string, jobId: string, blobId: string): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE threat_memory_writes SET status = 'completed', walrus_job_id = $3, blob_id = $4,
+       failure_code = NULL, updated_at = now() WHERE id = $1 AND user_id = $2 AND status <> 'completed'`,
+      [memoryId, userId, jobId, blobId],
+    );
+    if (result.rowCount !== 1) throw new Error("Threat memory write could not be completed");
+  }
+
+  async failThreatMemoryWrite(userId: string, memoryId: string, failureCode: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE threat_memory_writes SET status = 'failed', failure_code = $3, updated_at = now()
+       WHERE id = $1 AND user_id = $2 AND status <> 'completed'`,
+      [memoryId, userId, failureCode],
+    );
   }
 
   async listThreatMemoryWrites(userId: string, limit: number, cursor?: { createdAt: string; id: string }): Promise<{ memories: ThreatMemoryWrite[]; hasMore: boolean; lastCursor: { createdAt: string; id: string } | null }> {

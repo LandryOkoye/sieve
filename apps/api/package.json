@@ -7,6 +7,7 @@
     "build": "tsc --noEmit",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
+    "evaluate:validation": "tsx ../../scripts/evaluate-held-out.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -20,6 +21,7 @@
     "@sieve/contracts": "workspace:*",
     "@sieve/detector": "workspace:*",
     "@sieve/evaluation": "workspace:*",
+    "@sieve/threat-memory": "workspace:*",
     "jose": "^6.2.12",
     "pg": "^8.23.1"
   }

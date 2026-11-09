@@ -1,4 +1,6 @@
 import type { OidcConfig } from "./auth.js";
+import type { SemanticJudgeConfig } from "@sieve/detector";
+import type { WalrusMemoryConfig } from "@sieve/threat-memory/walrus";
 
 export type IntegrationStatus = "available" | "unavailable" | "unverified" | "not_configured";
 
@@ -7,6 +9,8 @@ export type ApiConfig = {
   databaseUrl: string | undefined;
   tatumApiKey: string | undefined;
   metricsBearerToken: string | undefined;
+  semanticJudge: SemanticJudgeConfig | undefined;
+  walrusMemory: WalrusMemoryConfig | undefined;
   suiNetwork: "mainnet" | "testnet";
   auth: OidcConfig | undefined;
   integrations: {
@@ -14,6 +18,7 @@ export type ApiConfig = {
     authentication: IntegrationStatus;
     tatum: IntegrationStatus;
     walrusMemory: IntegrationStatus;
+    semanticJudge: IntegrationStatus;
   };
 };
 
@@ -49,6 +54,53 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     throw new Error("METRICS_BEARER_TOKEN must contain at least 32 characters when configured");
   }
 
+  const judgeApiKey = environment.OPENAI_API_KEY;
+  const judgeModel = environment.OPENAI_MODEL;
+  const groqApiKey = environment.GROQ_API_KEY;
+  const groqModel = environment.GROQ_MODEL || (groqApiKey ? "openai/gpt-oss-20b" : undefined);
+  const configuredProvider = environment.SEMANTIC_JUDGE_PROVIDER;
+  if (configuredProvider && !["openai", "groq", "nvidia"].includes(configuredProvider)) {
+    throw new Error("SEMANTIC_JUDGE_PROVIDER must be openai, groq, or nvidia");
+  }
+  if (Boolean(judgeApiKey) !== Boolean(judgeModel)) {
+    throw new Error("OPENAI_API_KEY and OPENAI_MODEL must be configured together");
+  }
+  const nvidiaApiKey = environment.NVIDIA_API_KEY;
+  const nvidiaModel = environment.NVIDIA_MODEL;
+  if (Boolean(nvidiaApiKey) !== Boolean(nvidiaModel)) {
+    throw new Error("NVIDIA_API_KEY and NVIDIA_MODEL must be configured together");
+  }
+  const configuredProviders = [judgeApiKey, groqApiKey, nvidiaApiKey].filter(Boolean).length;
+  if (configuredProviders > 1 && !configuredProvider) {
+    throw new Error("SEMANTIC_JUDGE_PROVIDER is required when multiple judge providers are configured");
+  }
+  const judgeProvider = configuredProvider || (nvidiaApiKey ? "nvidia" : groqApiKey ? "groq" : judgeApiKey ? "openai" : undefined);
+  if (judgeProvider === "openai" && (!judgeApiKey || !judgeModel)) {
+    throw new Error("OPENAI_API_KEY and OPENAI_MODEL are required for the OpenAI semantic judge");
+  }
+  if (judgeProvider === "groq" && (!groqApiKey || !groqModel)) {
+    throw new Error("GROQ_API_KEY and GROQ_MODEL are required for the Groq semantic judge");
+  }
+  if (judgeProvider === "nvidia" && (!nvidiaApiKey || !nvidiaModel)) {
+    throw new Error("NVIDIA_API_KEY and NVIDIA_MODEL are required for the NVIDIA semantic judge");
+  }
+  if (judgeModel && (judgeModel.length > 100 || !/^[A-Za-z0-9._:-]+$/.test(judgeModel))) {
+    throw new Error("OPENAI_MODEL contains unsupported characters or is too long");
+  }
+  if (groqModel && (groqModel.length > 100 || !/^[A-Za-z0-9._:/-]+$/.test(groqModel))) {
+    throw new Error("GROQ_MODEL contains unsupported characters or is too long");
+  }
+  if (nvidiaModel && (nvidiaModel.length > 100 || !/^[A-Za-z0-9._:/-]+$/.test(nvidiaModel))) {
+    throw new Error("NVIDIA_MODEL contains unsupported characters or is too long");
+  }
+  const semanticJudge = judgeProvider === "groq" && groqApiKey && groqModel
+    ? { provider: "groq-responses" as const, apiKey: groqApiKey, model: groqModel, baseUrl: "https://api.groq.com/openai/v1" }
+    : judgeProvider === "nvidia" && nvidiaApiKey && nvidiaModel
+      ? { provider: "nvidia-nim-chat" as const, apiKey: nvidiaApiKey, model: nvidiaModel, baseUrl: "https://integrate.api.nvidia.com/v1" }
+    : judgeProvider === "openai" && judgeApiKey && judgeModel
+      ? { provider: "openai-responses" as const, apiKey: judgeApiKey, model: judgeModel, baseUrl: "https://api.openai.com/v1" }
+    : undefined;
+
   const walrusServerUrl = environment.MEMWAL_SERVER_URL;
   if (walrusServerUrl) {
     const parsedWalrusUrl = new URL(walrusServerUrl);
@@ -56,6 +108,25 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
       throw new Error("MEMWAL_SERVER_URL must use HTTP or HTTPS");
     }
   }
+  const walrusAccountId = environment.MEMWAL_ACCOUNT_ID;
+  const walrusDelegateKey = environment.MEMWAL_PRIVATE_KEY;
+  if (Boolean(walrusAccountId) !== Boolean(walrusDelegateKey)) {
+    throw new Error("MEMWAL_ACCOUNT_ID and MEMWAL_PRIVATE_KEY must be configured together");
+  }
+  const walrusNamespace = environment.MEMWAL_NAMESPACE?.trim() || "sieve-threat-memory";
+  if (walrusNamespace.length > 255 || /[\u0000-\u001f]/.test(walrusNamespace)) {
+    throw new Error("MEMWAL_NAMESPACE must be at most 255 characters and contain no control characters");
+  }
+  const walrusMemory = walrusAccountId && walrusDelegateKey
+    ? {
+        accountId: walrusAccountId,
+        delegateKey: walrusDelegateKey,
+        serverUrl: walrusServerUrl || (network === "mainnet"
+          ? "https://relayer.memory.walrus.xyz"
+          : "https://relayer-staging.memory.walrus.xyz"),
+        namespace: walrusNamespace,
+      }
+    : undefined;
 
   const oidcIssuer = environment.AUTH_ISSUER;
   const oidcAudience = environment.AUTH_AUDIENCE;
@@ -81,15 +152,16 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     databaseUrl: environment.DATABASE_URL,
     tatumApiKey: environment.TATUM_API_KEY,
     metricsBearerToken,
+    semanticJudge,
+    walrusMemory,
     suiNetwork: network,
     auth,
     integrations: {
       database: integrationStatus(Boolean(environment.DATABASE_URL)),
       authentication: integrationStatus(Boolean(auth)),
       tatum: integrationStatus(Boolean(environment.TATUM_API_KEY)),
-      walrusMemory: integrationStatus(
-        Boolean(environment.MEMWAL_ACCOUNT_ID && environment.MEMWAL_PRIVATE_KEY),
-      ),
+      walrusMemory: integrationStatus(Boolean(walrusMemory)),
+      semanticJudge: integrationStatus(Boolean(semanticJudge)),
     },
   };
 }

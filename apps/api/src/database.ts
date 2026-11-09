@@ -2,8 +2,9 @@ import { readdir, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { Pool } from "pg";
-import type { DetectorVerdict, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
+import type { DetectorVerdict, EvaluationDetectorConfig, EvaluationMetrics, EvaluationRun, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, ThreatMemoryWrite } from "@sieve/contracts";
 import { applyEvaluationThresholds } from "@sieve/evaluation";
+import type { ThreatMemoryRecord } from "@sieve/threat-memory/policy";
 
 const migrationsDirectory = new URL("../../../db/migrations/", import.meta.url);
 
@@ -104,7 +105,7 @@ export class Database {
     return result.rowCount === 1;
   }
 
-  async saveAssessment(userId: string, caseId: string, verdict: DetectorVerdict): Promise<void> {
+  async saveAssessment(userId: string, caseId: string, verdict: DetectorVerdict, detectorVersion: string): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -113,8 +114,8 @@ export class Database {
       const revision = await client.query<{ revision: number | null }>("SELECT max(revision) AS revision FROM assessment_revisions WHERE case_id = $1", [caseId]);
       await client.query(
         `INSERT INTO assessment_revisions (id, case_id, revision, detector_version, outcome, result)
-         VALUES ($1, $2, $3, 'baseline-rules-v1', $4, $5::jsonb)`,
-        [randomUUID(), caseId, (revision.rows[0]?.revision ?? 0) + 1, verdict.outcome, JSON.stringify(verdict)],
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [randomUUID(), caseId, (revision.rows[0]?.revision ?? 0) + 1, detectorVersion, verdict.outcome, JSON.stringify(verdict)],
       );
       await client.query("UPDATE inspection_cases SET status = 'completed', updated_at = now() WHERE id = $1", [caseId]);
       await client.query("COMMIT");
@@ -139,6 +140,52 @@ export class Database {
     return result.rows[0] ? toThreatMemoryWrite(result.rows[0]) : null;
   }
 
+  async createThreatMemoryWrite(userId: string, caseId: string, record: ThreatMemoryRecord): Promise<ThreatMemoryWrite> {
+    await this.pool.query(
+      `INSERT INTO threat_memory_writes (id, user_id, case_id, pattern, status, normalized_record)
+       VALUES ($1, $2, $3, $4, 'pending', $5::jsonb)
+       ON CONFLICT (case_id, pattern) DO NOTHING`,
+      [randomUUID(), userId, caseId, record.pattern, JSON.stringify(record)],
+    );
+    let result = await this.pool.query<ThreatMemoryRow>(
+      `${threatMemorySelect} WHERE user_id = $1 AND case_id = $2 AND pattern = $3`,
+      [userId, caseId, record.pattern],
+    );
+    let row = result.rows[0];
+    if (!row) throw new Error("Could not create or load threat memory write");
+    if (row.status === "failed") {
+      await this.pool.query(
+        `UPDATE threat_memory_writes SET status = 'pending', failure_code = NULL, updated_at = now()
+         WHERE id = $1 AND user_id = $2 AND status = 'failed'`,
+        [row.id, userId],
+      );
+      result = await this.pool.query<ThreatMemoryRow>(
+        `${threatMemorySelect} WHERE user_id = $1 AND id = $2`,
+        [userId, row.id],
+      );
+      row = result.rows[0];
+    }
+    if (!row) throw new Error("Could not load threat memory write");
+    return toThreatMemoryWrite(row);
+  }
+
+  async completeThreatMemoryWrite(userId: string, memoryId: string, jobId: string, blobId: string): Promise<void> {
+    const result = await this.pool.query(
+      `UPDATE threat_memory_writes SET status = 'completed', walrus_job_id = $3, blob_id = $4,
+       failure_code = NULL, updated_at = now() WHERE id = $1 AND user_id = $2 AND status <> 'completed'`,
+      [memoryId, userId, jobId, blobId],
+    );
+    if (result.rowCount !== 1) throw new Error("Threat memory write could not be completed");
+  }
+
+  async failThreatMemoryWrite(userId: string, memoryId: string, failureCode: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE threat_memory_writes SET status = 'failed', failure_code = $3, updated_at = now()
+       WHERE id = $1 AND user_id = $2 AND status <> 'completed'`,
+      [memoryId, userId, failureCode],
+    );
+  }
+
   async listThreatMemoryWrites(userId: string, limit: number, cursor?: { createdAt: string; id: string }): Promise<{ memories: ThreatMemoryWrite[]; hasMore: boolean; lastCursor: { createdAt: string; id: string } | null }> {
     const values: unknown[] = [userId];
     let cursorClause = "";
@@ -161,12 +208,12 @@ export class Database {
     };
   }
 
-  async createEvaluation(userId: string, fixtureSetVersion: string): Promise<EvaluationRun> {
+  async createEvaluation(userId: string, fixtureSetVersion: string, detectorConfig: EvaluationDetectorConfig): Promise<EvaluationRun> {
     const result = await this.pool.query<EvaluationRow>(
       `INSERT INTO evaluation_runs (id, user_id, status, fixture_set_version, detector_config)
        VALUES ($1, $2, 'queued', $3, $4::jsonb)
        RETURNING id, status, fixture_set_version, detector_config, metrics, failure_code, created_at, completed_at`,
-      [randomUUID(), userId, fixtureSetVersion, JSON.stringify({ detectorVersion: "baseline-rules-v1" })],
+      [randomUUID(), userId, fixtureSetVersion, JSON.stringify(detectorConfig)],
     );
     const row = result.rows[0];
     if (!row) throw new Error("Could not create evaluation run");
@@ -337,9 +384,21 @@ const evaluationSelect = `SELECT id, status, fixture_set_version, detector_confi
   created_at::text AS cursor_created_at, completed_at FROM evaluation_runs`;
 
 function toEvaluationRun(row: EvaluationRow): EvaluationRun {
-  const detectorConfig = row.detector_config && typeof row.detector_config === "object" && !Array.isArray(row.detector_config)
+  const rawConfig = row.detector_config && typeof row.detector_config === "object" && !Array.isArray(row.detector_config)
     ? row.detector_config as Record<string, unknown>
     : {};
+  const rawJudge = rawConfig.semanticJudge && typeof rawConfig.semanticJudge === "object" && !Array.isArray(rawConfig.semanticJudge)
+    ? rawConfig.semanticJudge as Record<string, unknown>
+    : null;
+  const semanticJudge: EvaluationDetectorConfig["semanticJudge"] = rawJudge?.enabled === false
+    ? { enabled: false }
+    : (rawJudge?.provider === "openai-responses" || rawJudge?.provider === "groq-responses" || rawJudge?.provider === "nvidia-nim-chat") && typeof rawJudge.model === "string"
+      ? { provider: rawJudge.provider, model: rawJudge.model }
+      : undefined;
+  const detectorConfig: EvaluationDetectorConfig = {
+    detectorVersion: typeof rawConfig.detectorVersion === "string" ? rawConfig.detectorVersion : "baseline-rules-v1",
+    ...(semanticJudge ? { semanticJudge } : {}),
+  };
   return {
     id: row.id,
     status: row.status,

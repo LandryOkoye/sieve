@@ -115,24 +115,47 @@ function ConnectScreen({ onConnect, clientId, message }: {
     setError('')
     try { await onConnect(idToken) } catch (cause) { setError(readableApiError(cause)) } finally { setBusy(false) }
   }
-  return <main className="auth-screen">
-    <div className="auth-orbit orbit-one" /><div className="auth-orbit orbit-two" />
-    <div className="auth-mark"><span className="brand-mark">S</span><span>SIEVE</span><span className="brand-caption">EVIDENCE INTELLIGENCE</span></div>
-    <section className="auth-card">
-      <div className="auth-icon"><Icon name="lock" size={21} /></div>
-      <p className="eyebrow">SECURE WORKSPACE</p>
-      <h1>Connect to SIEVE</h1>
-      <p className="auth-copy">Sign in with your Google account to open your inspection workspace.</p>
-      {clientId
-        ? <div className={busy ? 'google-signin-wrap is-busy' : 'google-signin-wrap'} aria-busy={busy}>
-          <GoogleSignInButton clientId={clientId} onCredential={acceptGoogleCredential} onError={(signInError) => setError(signInError.message)} />
+  return <main className="landing-screen">
+    <header className="landing-nav">
+      <a className="landing-brand" href="#" aria-label="SIEVE home"><img src="/sieve-neon-logo.png" alt="SIEVE" /></a>
+      <span className="landing-nav-note"><i /> SUI EVIDENCE INTELLIGENCE</span>
+      <span className="landing-version">READ ONLY <b>·</b> MAINNET / TESTNET</span>
+    </header>
+    <section className="landing-hero">
+      <div className="landing-copy">
+        <p className="landing-kicker"><span>01</span> / VERIFY WHAT YOUR AGENT SEES</p>
+        <h1>Trust the evidence.<br /><em>Question the text.</em></h1>
+        <p className="landing-description">SIEVE inspects on-chain evidence, isolates manipulative content, and shows you exactly why a signal was raised.</p>
+        <div className="landing-actions">
+          {clientId ? <div className={`landing-signin ${busy ? 'is-busy' : ''}`} aria-busy={busy}><GoogleSignInButton clientId={clientId} onCredential={acceptGoogleCredential} onError={(signInError) => setError(signInError.message)} /></div> : <p className="inline-error" role="status">Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID for the web app.</p>}
+          <span className="landing-action-note"><Icon name="lock" size={13} /> Secure, read-only workspace</span>
         </div>
-        : <p className="inline-error" role="status">Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID for the web app.</p>}
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      {message && <div className="inline-error" role="status">{message}</div>}
-      <p className="auth-footnote"><Icon name="lock" size={13} /> SIEVE validates your Google identity on the server.</p>
+        {error && <div className="inline-error" role="alert">{error}</div>}
+        {message && <div className="inline-error" role="status">{message}</div>}
+      </div>
+      <div className="landing-visual" aria-label="SIEVE separates chain facts from untrusted text">
+        <div className="visual-topline"><span>INSPECTION PIPELINE</span><span>LIVE / SUI</span></div>
+        <pre className="sieve-ascii" aria-hidden="true">{`   ┌────────────────────────┐
+   │   S U I   E V I D E N C E │
+   └───────────┬────────────┘
+               │
+       .  .  .  ▼  .  .  .
+      ╭──────────────────╮
+      │  / / / / / / / / │
+      │  / / S I E V E / │
+      │  / / / / / / / / │
+      ╰───┬──────────┬───╯
+          │          └──────╴  QUARANTINED TEXT
+          └─────────────────  VERIFIED FACTS`}</pre>
+        <div className="visual-bottom"><span><i className="signal-dot" /> EVIDENCE BOUNDARY ACTIVE</span><span>0x7A…9F2C</span></div>
+      </div>
     </section>
-    <p className="auth-bottom">Read-only access · Sui mainnet and testnet</p>
+    <section className="landing-principles" aria-label="SIEVE principles">
+      <article><span>01</span><div><strong>Fresh evidence</strong><p>Every finding starts with data fetched from Sui.</p></div></article>
+      <article><span>02</span><div><strong>Text stays inert</strong><p>Descriptions and event text are isolated as untrusted.</p></div></article>
+      <article><span>03</span><div><strong>Uncertainty is visible</strong><p>Partial results are called out, never mistaken for clean.</p></div></article>
+    </section>
+    <footer className="landing-footer"><span>© SIEVE — EVIDENCE INTELLIGENCE</span><span>YOUR AGENT'S READ PATH, MADE VISIBLE <b>↗</b></span></footer>
   </main>
 }
 
@@ -282,7 +305,7 @@ function App() {
   const pageTitle = page.name === 'case' ? 'Inspection detail' : ({ overview: 'Overview', inspect: 'Inspect evidence', memory: 'Threat memory', evaluations: 'Evaluations', settings: 'Settings' } as Record<string, string>)[page.name]
   return <div className="app-shell">
     <aside className="sidebar">
-      <button className="brand-lockup" onClick={() => navigate({ name: 'overview' })} aria-label="SIEVE overview"><span className="brand-mark">S</span><span className="brand-word">SIEVE<span className="brand-period">.</span></span></button>
+      <button className="brand-lockup" onClick={() => navigate({ name: 'overview' })} aria-label="SIEVE overview"><img className="sidebar-logo" src="/sieve-neon-logo.png" alt="SIEVE" /></button>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="main-nav" aria-label="Main navigation">
         {navItems.map((item) => <button key={item.name} className={`nav-link ${page.name === item.name || (item.name === 'overview' && page.name === 'case') ? 'active' : ''}`} onClick={() => navigate({ name: item.name })}><Icon name={item.icon} /><span>{item.label}</span>{item.name === 'memory' && <span className="nav-soon">SOON</span>}</button>)}

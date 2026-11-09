@@ -73,8 +73,10 @@ The deterministic detector works without an LLM. To enable the semantic judge,
 configure a provider key and model pair: `OPENAI_API_KEY` with `OPENAI_MODEL`,
 `GROQ_API_KEY` with `GROQ_MODEL`, or `NVIDIA_API_KEY` with `NVIDIA_MODEL`.
 When multiple providers are configured, select one with
-`SEMANTIC_JUDGE_PROVIDER`. The API sends bounded, extracted chain text with
-strict JSON Schema output and no tools. OpenAI requests use the Responses API
+`SEMANTIC_JUDGE_PROVIDER`. The API sends bounded inspected text and, when present, minimized recalled memory in
+separate fields as untrusted data, with strict JSON Schema output and no tools. Memory
+can inform classification but cannot independently establish an attack, promote a record,
+change policy, or execute an action. OpenAI requests use the Responses API
 and disable response storage; Groq requests use its Responses API and omit the
 unsupported `store` parameter; NVIDIA requests use its Chat Completions API and
 `response_format` JSON Schema. NVIDIA currently documents JSON Schema output

@@ -38,7 +38,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 
 ## Semantic-analysis safety
 
-- [ ] Label both source content and recalled memory as untrusted data in the model request.
+- [ ] Label both source content and recalled memory as untrusted data in the model request. (Separate structured fields, no tools, and current-content evidence validation are implemented; endpoint integration pending.)
 - [ ] Send only bounded fields, with no arbitrary tools or production secrets. Keep memory in a distinct structured field, never as privileged instructions.
 - [ ] Validate exact structured output, indexes, categories, rationale length, and consistency. Invalid output becomes inconclusive; it never promotes memory or returns a clean result.
 - [ ] Preserve deterministic findings if semantic analysis disagrees. The model may add context or mark uncertainty, but policy remains deterministic and server-owned.

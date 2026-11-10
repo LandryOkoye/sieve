@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { api, readableApiError } from './api'
-import type { AgentAssessmentSummary, AgentInspectionResponse, ProtectedAgent } from './agent-contract'
+import type { AgentAssessmentSummary, AgentInspectionResponse, ProtectedAgent, ThreatMemoryReviewAction } from './agent-contract'
 import './AgentProtection.css'
 
 export function AgentProtectionPage({ idToken, onAssessment }: {
@@ -96,7 +96,7 @@ export function AgentProtectionPage({ idToken, onAssessment }: {
             <p className="agent-privacy-note"><Icon name="lock" size={13} /> A configured semantic provider may receive bounded content. SIEVE persists the content hash, assessment, and policy decision.</p>
           </div>
         </form>
-        {result && <AgentAssessment result={result} />}
+        {result && <AgentAssessment key={result.id} result={result} idToken={idToken} />}
       </div>
 
       <aside className="agent-boundary-panel">
@@ -116,14 +116,30 @@ function Icon({ name, size }: { name: string; size: number }) {
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11Z" /><path d="m9 12 2 2 4-4" /></svg>
 }
 
-function AgentAssessment({ result }: { result: AgentInspectionResponse }) {
+function AgentAssessment({ result, idToken }: { result: AgentInspectionResponse; idToken: string }) {
+  const [memories, setMemories] = useState(result.memoryLearning)
+  const [rationale, setRationale] = useState('')
+  const [reviewing, setReviewing] = useState('')
+  const [reviewError, setReviewError] = useState('')
   const action = result.decision.action
+
+  async function review(memoryId: string, action: ThreatMemoryReviewAction) {
+    if (!rationale.trim()) { setReviewError('Add a rationale for this review decision.'); return }
+    setReviewing(`${memoryId}:${action}`)
+    setReviewError('')
+    try {
+      const updated = await api.reviewThreatMemory(idToken, memoryId, action, rationale.trim())
+      setMemories((previous) => previous.map((memory) => memory.id === updated.id ? { ...memory, status: updated.status, storageStatus: updated.status === 'active' ? 'stored' : memory.storageStatus } : memory))
+      setRationale('')
+    } catch (cause) { setReviewError(readableApiError(cause)) } finally { setReviewing('') }
+  }
+
   return <section className={`panel agent-assessment action-${action}`} aria-live="polite">
     <div className="panel-heading"><div><p className="eyebrow">EVIDENCE-BACKED RESULT</p><h2>Assessment complete</h2></div><span className={`agent-action-badge action-badge-${action}`}>{action.toUpperCase()}</span></div>
     <div className="agent-result-summary"><span>{result.assessment.outcome.replaceAll('_', ' ')}</span><span>Policy v{result.decision.policyVersion}</span><span>{new Date(result.createdAt).toLocaleString()}</span></div>
     {result.assessment.findings.length ? <div className="agent-findings">{result.assessment.findings.map((finding, index) => <article key={`${finding.signal}-${index}`}><div><span className="category-pill">{finding.category.replaceAll('_', ' ')}</span><span className={`strength strength-${finding.strength}`}>{finding.strength}</span></div><h3>{finding.signal.replaceAll('_', ' ')}</h3><p>{finding.rationale}</p>{finding.evidence.startChar !== undefined && finding.evidence.endChar !== undefined && <code>Current content · chars {finding.evidence.startChar}–{finding.evidence.endChar}</code>}</article>)}</div> : <p className="agent-no-findings">No manipulation signal was found in this inspection. This is an assessment of the submitted content, not a guarantee of safety.</p>}
     <div className="agent-memory-evidence"><Icon name="shield" size={15} /><span>{result.memoryEvidence.length ? `${result.memoryEvidence.length} validated memory record${result.memoryEvidence.length === 1 ? '' : 's'} used as supporting context` : 'No validated threat memory contributed to this assessment'}</span></div>
-    {result.memoryLearning.length > 0 && <div className="agent-candidates"><strong>New threat-memory candidate</strong>{result.memoryLearning.map((memory) => <span key={memory.id}>{memory.status} · storage {memory.storageStatus ?? 'pending'} · {memory.id.slice(0, 8)}</span>)}<small>Candidates require authorized review before they can be recalled.</small></div>}
+    {memories.length > 0 && <div className="agent-candidates"><strong>Threat-memory review</strong><p>Candidate observations are not trusted or retrievable until an authorized workspace reviewer validates and promotes them.</p><label htmlFor="memory-review-rationale">Review rationale</label><textarea id="memory-review-rationale" value={rationale} onChange={(event) => setRationale(event.target.value)} maxLength={1000} placeholder="Explain the evidence and reason for this review decision" />{memories.map((memory) => <div className="agent-candidate-row" key={memory.id}><span><b>{memory.status}</b> · Walrus {memory.storageStatus ?? 'pending'} · <code>{memory.id.slice(0, 8)}</code></span><div>{memory.status === 'candidate' && <><button type="button" disabled={Boolean(reviewing)} onClick={() => void review(memory.id, 'validate')}>{reviewing === `${memory.id}:validate` ? 'Validating…' : 'Validate'}</button><button type="button" className="candidate-reject" disabled={Boolean(reviewing)} onClick={() => void review(memory.id, 'reject')}>{reviewing === `${memory.id}:reject` ? 'Rejecting…' : 'Reject'}</button></>}{memory.status === 'validated' && <button type="button" disabled={Boolean(reviewing) || memory.storageStatus !== 'stored'} onClick={() => void review(memory.id, 'promote')}>{reviewing === `${memory.id}:promote` ? 'Promoting…' : 'Promote active'}</button>}</div></div>)}{reviewError && <span className="candidate-review-error" role="alert">{reviewError}</span>}<small>Promotion requires a stored candidate and creates a fresh, expiry-verified Walrus record.</small></div>}
     <div className="agent-result-hash"><span>Content SHA-256</span><code>{result.contentHash}</code></div>
   </section>
 }

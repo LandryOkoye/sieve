@@ -29,6 +29,26 @@ The browser API helpers expose this flow:
 
 The **Protect content** screen provisions a key or accepts an existing agent key, submits direct content, and presents the server-owned decision with current-content findings. It shows memory hits as context and new observations as pending candidates, never as trusted memory.
 
+When a strong finding creates a candidate, a workspace reviewer can enter a rationale and validate it from the assessment result. Validation does not make the record retrievable: the reviewer must separately promote it. Promotion is enabled only after the candidate write is confirmed in Walrus, and the API verifies a fresh active blob and expiry. The API checks reviewer authorization and memory scope for every action; the browser is not the trust boundary. Rejected candidates remain non-retrievable.
+
+#### Candidate review states
+
+- **Candidate:** detector evidence has produced a minimized observation; it is excluded from recall.
+- **Validate:** an authorized workspace reviewer records a rationale and confirms the evidence supports the pattern.
+- **Validated:** the review is recorded, but the record is still excluded from recall.
+- **Promote active:** the reviewer makes a separate decision; the API writes a fresh Walrus record and verifies its expiry.
+- **Active:** PostgreSQL and the exact active Walrus blob reference authorize scoped recall.
+- **Reject:** the observation remains unavailable to inspection decisions.
+- The UI always shows Walrus write status alongside lifecycle status.
+- Promotion stays disabled when storage is pending or failed.
+- The reviewer rationale is required for each transition.
+- A successful action updates the candidate status returned by the API.
+- Failed or unauthorized transitions stay visible as errors and do not change the local status.
+- Recalled memory is displayed as context; the current inspection remains the evidence source.
+- Memory records from the legacy Sui case workflow are shown on a separate page and are not presented as validated agent memory.
+- Agent credentials remain in page memory and are not saved across reloads.
+- Review requests include only the record ID, action, and reviewer rationale.
+
 The signed-in dashboard opens on the agent-defense workflow and shows direct-content assessments from the current browser session. Sui case history is available separately as the first optional chain-evidence integration.
 
 Create an OAuth client of type **Web application** in Google Cloud. Add `http://localhost:5173` as an authorized JavaScript origin. Copy `apps/web/.env.example` to `apps/web/.env.local` and set `VITE_GOOGLE_CLIENT_ID` to the client ID. No client secret is used by the browser or API for this ID-token flow.

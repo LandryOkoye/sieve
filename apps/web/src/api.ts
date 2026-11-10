@@ -1,5 +1,5 @@
 import type { EvaluationPage, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryPage, ThreatMemoryWrite } from '@sieve/contracts'
-import type { AgentInspectionResponse, AgentProvisionResponse } from './agent-contract'
+import type { AgentInspectionResponse, AgentProvisionResponse, ThreatMemoryReviewAction, ThreatMemoryReviewResponse } from './agent-contract'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? ''
 
@@ -50,6 +50,10 @@ export const api = {
       method: 'POST',
       headers: { 'Idempotency-Key': crypto.randomUUID() },
       body: JSON.stringify({ content, sourceType, ...(sourceRef ? { sourceRef } : {}) }),
+    }),
+  reviewThreatMemory: (idToken: string, memoryId: string, action: ThreatMemoryReviewAction, rationale: string) =>
+    request<ThreatMemoryReviewResponse>(`/api/v1/threat-memories/${memoryId}/review`, idToken, {
+      method: 'POST', body: JSON.stringify({ action, rationale }),
     }),
   health: async () => {
     const response = await fetch(`${API_BASE}/api/v1/health/ready`, { headers: { Accept: 'application/json' } })

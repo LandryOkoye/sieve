@@ -13,6 +13,9 @@ export type AgentProvisionResponse = {
   credential: { secret: string; prefix: string }
 }
 
+export type ThreatMemoryReviewAction = 'validate' | 'promote' | 'reject'
+export type ThreatMemoryReviewResponse = { id: string; status: string; walrusExpiresAt: string | null }
+
 export type AgentInspectionResponse = {
   id: string
   contentHash: string

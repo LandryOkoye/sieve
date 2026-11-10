@@ -31,6 +31,7 @@ export async function inspectForAgent(input: {
   now?: string;
   recall?: (query: string, agent: ProtectedAgent) => Promise<readonly unknown[]>;
   semanticReview?: (items: readonly UntrustedText[], memories: readonly ThreatMemory[]) => Promise<{ findings: DetectorVerdict["findings"]; complete: boolean }>;
+  afterAssessment?: (input: { inspectionId: string; agent: ProtectedAgent; contentHash: string; sourceType: string; at: string; findings: DetectorVerdict["findings"] }) => Promise<readonly { id: string; status: string; storageStatus?: string }[]>;
 }): Promise<Reply> {
   const content = input.body.content;
   const sourceType = input.body.sourceType ?? "direct_content";
@@ -47,6 +48,7 @@ export async function inspectForAgent(input: {
 
   const contentHash = createHash("sha256").update(content).digest("hex");
   const sourceRefHash = typeof sourceRef === "string" ? createHash("sha256").update(sourceRef).digest("hex") : null;
+  const inspectedAt = input.now ?? new Date().toISOString();
   const textItems: UntrustedText[] = [{
     field: sourceType,
     value: content,
@@ -57,7 +59,7 @@ export async function inspectForAgent(input: {
     textItems,
     completeness: "complete",
     scope: { workspaceId: agent.workspaceId, agentId: agent.id, includeGlobal },
-    now: input.now ?? new Date().toISOString(),
+    now: inspectedAt,
     recall: (query) => input.recall ? input.recall(query, agent) : Promise.resolve([]),
     ...(input.semanticReview ? { semanticReview: input.semanticReview } : {}),
   });
@@ -78,6 +80,9 @@ export async function inspectForAgent(input: {
     policyVersion: agent.policyVersion,
   });
   if ("conflict" in stored) return { status: 409, body: { error: "idempotency_key_conflict" } };
+  const memoryLearning = input.afterAssessment
+    ? await input.afterAssessment({ inspectionId: stored.inspection.id, agent, contentHash, sourceType, at: inspectedAt, findings: stored.inspection.findings })
+    : [];
 
   return {
     status: stored.created ? 201 : 200,
@@ -87,6 +92,7 @@ export async function inspectForAgent(input: {
       assessment: { outcome: stored.inspection.outcome, findings: stored.inspection.findings },
       decision: { action: stored.inspection.action, policyVersion: agent.policyVersion },
       memoryEvidence: stored.inspection.memoryIds.map((id) => ({ id, role: "supporting_context" })),
+      memoryLearning,
       createdAt: stored.inspection.createdAt,
       expiresAt: stored.inspection.expiresAt,
     },

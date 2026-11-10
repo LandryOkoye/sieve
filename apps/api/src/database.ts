@@ -186,7 +186,8 @@ export class Database {
     const normalized = { ...parsed, createdBy };
     await this.pool.query(
       `INSERT INTO threat_memories (id,scope,workspace_id,agent_id,category,technique_id,safe_fingerprint,minimized_record,status,created_by,source_inspection_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,'candidate',$9,$10)
+       SELECT $1,$2,$3,$4,$5,$6,$7,$8::jsonb,'candidate',$9,$10
+       WHERE EXISTS (SELECT 1 FROM direct_inspections i WHERE i.id = $10 AND i.workspace_id = $3 AND (i.agent_id = $4 OR $4 IS NULL))
        ON CONFLICT (source_inspection_id,safe_fingerprint) WHERE source_inspection_id IS NOT NULL DO NOTHING`,
       [normalized.id, normalized.scope.kind, workspaceId, agentId, normalized.category, normalized.techniqueId,
         normalized.safeFingerprint, JSON.stringify(normalized), createdBy, sourceInspectionId],
@@ -206,7 +207,7 @@ export class Database {
     const result = await this.pool.query(
       `UPDATE threat_memories SET walrus_status = 'stored', walrus_job_id = $2, walrus_blob_id = $3,
        walrus_end_epoch = $4, walrus_expires_at = $5, last_reconciled_at = now(), updated_at = now()
-       WHERE id = $1 AND status = 'candidate'`, [memoryId, jobId, blobId, endEpoch, expiresAt],
+       WHERE id = $1 AND status IN ('candidate','validated')`, [memoryId, jobId, blobId, endEpoch, expiresAt],
     );
     if (result.rowCount !== 1) throw new Error("threat_memory_write_not_completable");
   }
@@ -214,8 +215,19 @@ export class Database {
   async failLifecycleMemoryWrite(memoryId: string): Promise<void> {
     await this.pool.query(
       `UPDATE threat_memories SET walrus_status = 'failed', last_reconciled_at = now(), updated_at = now()
-       WHERE id = $1 AND status = 'candidate'`, [memoryId],
+       WHERE id = $1 AND status IN ('candidate','validated')`, [memoryId],
     );
+  }
+
+  async hasGlobalMemoryCorroboration(fingerprint: string, workspaceIds: readonly string[]): Promise<boolean> {
+    const distinct = [...new Set(workspaceIds)];
+    if (distinct.length < 2) return false;
+    const result = await this.pool.query<{ count: string }>(
+      `SELECT count(DISTINCT workspace_id)::text AS count FROM threat_memories
+       WHERE safe_fingerprint = $1 AND workspace_id = ANY($2::text[])
+         AND scope IN ('agent','workspace') AND status IN ('validated','active')`, [fingerprint, distinct],
+    );
+    return Number(result.rows[0]?.count ?? 0) >= 2;
   }
 
   async getThreatMemoryForReview(userId: string, memoryId: string, canReviewGlobal: boolean): Promise<{ memory: ThreatMemory; blobId: string | null; walrusStatus: string } | null> {
@@ -226,7 +238,7 @@ export class Database {
     );
     const row = result.rows[0];
     const memory = row ? parseThreatMemory(row.minimized_record) : null;
-    return row && memory && row.status === memory.status ? { memory, blobId: row.walrus_blob_id, walrusStatus: row.walrus_status } : null;
+    return row && memory && row.status === memory.status && rowMatchesMemory(row, memory) ? { memory, blobId: row.walrus_blob_id, walrusStatus: row.walrus_status } : null;
   }
 
   async saveThreatMemoryReview(input: {
@@ -236,15 +248,20 @@ export class Database {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const current = await client.query<{ status: string }>(
-        `SELECT m.status FROM threat_memories m WHERE m.id = $1 AND (
+      const current = await client.query<LifecycleMemoryRow>(
+        `SELECT m.id,m.scope,m.workspace_id,m.agent_id,m.minimized_record,m.status,m.walrus_blob_id,m.walrus_status,m.walrus_expires_at
+         FROM threat_memories m WHERE m.id = $1 AND (
            (m.scope = 'global' AND $3) OR EXISTS (
              SELECT 1 FROM workspace_members wm WHERE wm.workspace_id = m.workspace_id
                AND wm.user_id = $2 AND wm.role IN ('owner','reviewer')
            )
          ) FOR UPDATE OF m`, [input.memory.id, input.reviewerId, input.canReviewGlobal],
       );
-      if (current.rows[0]?.status !== input.expectedStatus) {
+      const currentRow = current.rows[0];
+      const currentMemory = currentRow ? parseThreatMemory(currentRow.minimized_record) : null;
+      if (!currentRow || !currentMemory || currentRow.status !== input.expectedStatus || (input.action === "promote" && currentRow.walrus_status !== "stored") ||
+          !rowMatchesMemory(currentRow, input.memory) || !sameMemoryIdentity(currentMemory, input.memory) ||
+          !reviewTransitionMatches(input.action, input.expectedStatus, input.memory.status)) {
         await client.query("ROLLBACK");
         return false;
       }
@@ -711,6 +728,31 @@ function toThreatMemoryWrite(row: ThreatMemoryRow): ThreatMemoryWrite {
 
 function asJsonObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function rowMatchesMemory(row: LifecycleMemoryRow, memory: ThreatMemory): boolean {
+  return row.scope === memory.scope.kind &&
+    row.workspace_id === (memory.scope.kind === "global" ? null : memory.scope.workspaceId) &&
+    row.agent_id === (memory.scope.kind === "agent" ? memory.scope.agentId : null);
+}
+
+function sameMemoryIdentity(current: ThreatMemory, next: ThreatMemory): boolean {
+  return current.id === next.id && current.category === next.category && current.techniqueId === next.techniqueId &&
+    current.summary === next.summary && JSON.stringify(current.scope) === JSON.stringify(next.scope) &&
+    JSON.stringify(current.behavioralFeatures) === JSON.stringify(next.behavioralFeatures) && current.safeFingerprint === next.safeFingerprint &&
+    current.sourceType === next.sourceType && JSON.stringify(current.evidenceHashes) === JSON.stringify(next.evidenceHashes) &&
+    current.confidence === next.confidence && current.confidenceRationale === next.confidenceRationale && current.createdBy === next.createdBy &&
+    current.createdAt === next.createdAt && current.expiresAt === next.expiresAt;
+}
+
+function reviewTransitionMatches(action: string, current: string, next: string): boolean {
+  if (action === "validate") return current === "candidate" && next === "validated";
+  if (action === "promote") return current === "validated" && next === "active";
+  if (action === "reject") return (current === "candidate" || current === "validated") && next === "rejected";
+  if (action === "mark_false_positive") return !["rejected", "false_positive", "superseded"].includes(current) && next === "false_positive";
+  if (action === "revoke") return !["rejected", "false_positive", "revoked", "superseded"].includes(current) && next === "revoked";
+  if (action === "supersede") return current === "active" && next === "superseded";
+  return false;
 }
 
 function toDirectInspection(row: DirectInspectionRow): StoredDirectInspection {

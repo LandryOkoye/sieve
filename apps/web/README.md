@@ -1,6 +1,6 @@
 # SIEVE web
 
-The authenticated, read-only browser client for SIEVE's inspection API.
+The authenticated browser console for SIEVE's agent-defense API. Direct-content inspection is the primary workflow; Sui evidence is an optional provider integration.
 
 ## Local development
 
@@ -13,6 +13,19 @@ pnpm --filter @sieve/web dev
 Vite proxies `/api` requests to `http://localhost:3001`. Set `VITE_API_BASE_URL` when the API is hosted on a different origin. The API must allow browser requests from that origin in deployed environments.
 
 The connect screen uses Google's official Sign in with Google button. It sends Google's ID token to the API as a bearer token; the API validates its signature, issuer, expiry, and audience before creating the SIEVE user session. The ID token stays in this tab's `sessionStorage` and is removed when you disconnect.
+
+After sign-in, workspace owners can provision a protected agent. Its `sieve_live_` credential is returned once and held only in the current page state. Agents submit content to `/api/v1/agent/inspect`; the UI shows the evidence-backed decision and keeps review/block results out of trusted context. The API persists a content hash and assessment metadata, not the raw content.
+
+The browser API helpers expose this flow:
+
+- `api.createProtectedAgent(idToken, name)` provisions an agent and returns its one-time credential.
+- `api.inspectAgentContent(agentCredential, content, sourceType, sourceRef?)` sends direct content for inspection.
+- Each inspection gets a fresh `Idempotency-Key` so network retries cannot create duplicate records.
+- `decision.action` is one of `allow`, `review`, or `block` and must be enforced by the caller.
+- A `review` or `block` result must stay out of trusted agent context.
+- Findings include evidence references; recalled memory is reported as supporting context.
+- Strong findings may create a `candidate` memory; candidates are not trusted or retrievable until reviewed.
+- The browser must not put agent credentials into URLs, logs, analytics, or persistent browser storage.
 
 Create an OAuth client of type **Web application** in Google Cloud. Add `http://localhost:5173` as an authorized JavaScript origin. Copy `apps/web/.env.example` to `apps/web/.env.local` and set `VITE_GOOGLE_CLIENT_ID` to the client ID. No client secret is used by the browser or API for this ID-token flow.
 

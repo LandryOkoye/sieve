@@ -125,8 +125,7 @@ trusted context, returns an evidence-backed `allow`, `review`, or `block` decisi
 and stores the content hash, findings, policy version, and decision. Raw inspected
 content and source references are not persisted. Strong findings create minimized,
 review-gated candidates; the configured Walrus adapter recalls contextual memories
-before the final assessment. The TypeScript SDK and enforcement example remain
-pending. Agent credential rotation/revocation and request rate limits also remain pending.
+before the final assessment. The TypeScript SDK client is available in `packages/sdk` and an enforcement example is in `examples/agent-enforcement.ts`. Agent credential rotation/revocation and request rate limits remain pending.
 
 Review a candidate through `POST /api/v1/threat-memories/{memoryId}/review` using
 OIDC. `validate` and `promote` are separate actions and both require a rationale. Reviewers can also reject, mark false positives, revoke, or supersede active records; those states are excluded from recall.

@@ -45,7 +45,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 
 ## First complete vertical slice: restart-and-recall
 
-- [ ] A protected external agent submits direct content and provenance using the TypeScript SDK/API. (HTTP API and candidate/review path implemented; SDK remains pending. Real Walrus read/write restart test pending.)
+- [ ] A protected external agent submits direct content and provenance using the TypeScript SDK/API. (HTTP API, TypeScript SDK, and enforcement example implemented and tested. Real Walrus read/write restart test pending.)
 - [ ] SIEVE detects a fixture attack and returns a structured, evidence-backed assessment with a quarantine/review decision.
 - [ ] The SDK example enforces that decision before the content enters agent context.
 - [ ] SIEVE writes a minimized candidate record to the real configured Walrus Memory integration; PostgreSQL records its operation and blob references.
@@ -62,7 +62,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 3. Extend PostgreSQL for workspaces, protected agents, scoped credentials, policies, general inspections, memory lifecycle/review, memory operations, and audit events through additive migrations. (Migrations 0002–0003 and storage methods pass disposable PostgreSQL integration tests.)
 4. Add tested direct-content inspection and policy behavior independent of Tatum. (HTTP vertical slice implemented; SDK integration pending.)
 5. Add validated memory recall before final assessment, then controlled candidate write/review/promotion and real Walrus restart verification. (API pipeline and lifecycle paths implemented; real provider verification pending.)
-6. Add TypeScript SDK and the enforcement example; integrate UI only after locating and coordinating its source.
+6. Add TypeScript SDK and the enforcement example; integrate UI only after locating and coordinating its source. (SDK and example implemented; UI source remains unavailable.)
 7. Measure memory-on/off behavior and false-positive controls; add Tatum/Sui as an adapter to the same inspection pipeline.
 
 At each step, add tests at the public inspection, memory-lifecycle, storage, or SDK seams before implementation. Run targeted tests, typechecks, build, and migrations applicable to that step. Report real-provider checks separately from fixtures.

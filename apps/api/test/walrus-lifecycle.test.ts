@@ -15,12 +15,12 @@ const record: ThreatMemory = {
 };
 
 function memoryClient() {
-  const requests: Array<{ namespace: string; text?: string }> = [];
+  const requests: Array<{ namespace: string; text?: string; query?: string }> = [];
   return {
     requests,
     rememberAndWait: async (text: string, namespace: string) => { requests.push({ namespace, text }); return { id: "job_1", blob_id: "blob_1" }; },
     listMemories: async ({ namespace }: { namespace: string }) => ({ has_more: false, next_cursor: null, memories: [{ blob_id: "blob_1", end_epoch: 99, expires_at: "2027-01-01T00:00:00Z" }] }),
-    recall: async ({ namespace }: { namespace: string }) => { requests.push({ namespace }); return { results: [{ text: JSON.stringify(record), blob_id: "blob_1", distance: 0.2 }] }; },
+    recall: async ({ namespace, query }: { namespace: string; query: string }) => { requests.push({ namespace, query }); return { results: [{ text: JSON.stringify(record), blob_id: "blob_1", distance: 0.2 }] }; },
     health: async () => undefined,
   };
 }
@@ -28,7 +28,9 @@ function memoryClient() {
 test("Walrus lifecycle namespaces isolate scope and storage confirms blob expiry metadata", async () => {
   const agent = await namespaceForThreatScope("sieve-threat", record.scope);
   const workspace = await namespaceForThreatScope("sieve-threat", { kind: "workspace", workspaceId: "ws_1" });
+  const custom = await namespaceForThreatScope("custom namespace ".repeat(14), record.scope);
   assert.notEqual(agent, workspace);
+  assert.ok(custom.length < 200);
   assert.equal((await namespaceForThreatScope("sieve-threat", { kind: "global" })).endsWith("global"), true);
   const client = memoryClient();
   const walrus = new WalrusThreatMemory({ accountId: "acct", delegateKey: "key", serverUrl: "https://memory.test", namespace: "sieve-threat" }, client as never);
@@ -45,4 +47,12 @@ test("recall queries only derived features and returns parsed memory hits by iso
   assert.equal(hits.length, 2);
   assert.equal(new Set(client.requests.map(({ namespace }) => namespace)).size, 2);
   assert.equal(hits.every((hit) => hit.memory.id === "mem_1"), true);
+});
+
+test("readiness probes signed recall access in addition to relayer health", async () => {
+  const client = memoryClient();
+  const walrus = new WalrusThreatMemory({ accountId: "acct", delegateKey: "key", serverUrl: "https://memory.test", namespace: "sieve-threat" }, client as never);
+  await walrus.checkConnection();
+  assert.equal(client.requests[0]?.namespace, "sieve-threat");
+  assert.equal(client.requests[0]?.query, "sieve signed access probe");
 });

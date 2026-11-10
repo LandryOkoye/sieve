@@ -72,3 +72,5 @@ Migration `0002_agent_defense.sql` adds workspaces, protected agents, hashed rev
 Migration `0003_threat_memory_source_inspection.sql` links each candidate to the persisted direct-inspection record and makes candidate creation idempotent per inspection and safe fingerprint.
 
 The PostgreSQL recall authorization method uses the database record as authority: a Walrus hit is eligible only when its memory ID, active lifecycle status, current blob ID, fingerprint, scope, and local Walrus expiry match the stored record and requesting agent. The adapter alone is never an authorization decision.
+
+Migration `0004_memory_supersede_action.sql` permits an authorized reviewer to supersede an active record while preserving its audit history and excluding it from recall.

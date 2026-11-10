@@ -227,6 +227,39 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ThreatMemoryWrite' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/threat-memories/{memoryId}/review:
+    parameters:
+      - in: path
+        name: memoryId
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Review or promote a scoped threat-memory candidate
+      description: Requires an authorized workspace reviewer. Promotion uploads a fresh active record and verifies Walrus expiry before changing PostgreSQL state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, rationale]
+              properties:
+                action: { type: string, enum: [validate, promote, reject, mark_false_positive, revoke, supersede] }
+                rationale: { type: string, minLength: 12, maxLength: 500 }
+                privacyReviewed: { type: boolean }
+                corroboratingWorkspaceIds:
+                  type: array
+                  maxItems: 20
+                  uniqueItems: true
+                  items: { type: string }
+      responses:
+        '200':
+          description: Review transition persisted with reviewer identity and rationale.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Lifecycle state changed or the candidate is not durably stored. }
+        '503': { description: Walrus promotion or expiry verification is unavailable. }
   /api/v1/evaluations:
     post:
       summary: Start a fixture-based detector evaluation

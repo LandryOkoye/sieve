@@ -4,26 +4,26 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 
 ## Runtime inspection order
 
-- [ ] Authenticate the external agent with a scoped, revocable credential and resolve its workspace, agent, policy, limits, and permitted memory scopes. (One-time credential provisioning and inspection authentication are implemented; rotation/revocation endpoints and limits pending.)
+- [ ] Authenticate the external agent with a scoped, revocable credential and resolve its workspace, agent, policy, limits, and permitted memory scopes. (Provisioning and authentication are implemented; one-time secrets are hashed; rotation/revocation endpoints and rate limits pending.)
 - [ ] Validate and normalize the request. Direct content must be inspectable without Tatum. Preserve source provenance and correlation ID without requiring a private system prompt or conversation. (Direct HTTP route implemented; source references are hashed.)
-- [ ] Run initial deterministic detection before the final assessment. Record findings, evidence spans, detector version, and incomplete coverage.
+- [ ] Run initial deterministic detection before the final assessment. Record findings, evidence spans, detector version, and incomplete coverage. (Direct route records content hash, rule findings, and detector version; character spans remain pending.)
 - [ ] Derive a minimized retrieval query from detector features. Do not send submitted raw content, hidden prompts, conversation history, credentials, or sensitive context to Walrus.
 - [ ] Recall a bounded set of memories from the agent and workspace scopes; include global scope only when policy enables it.
-- [ ] Validate every recalled record against the PostgreSQL memory ID, scope, workspace/agent authorization, schema version, integrity/hash, lifecycle status, provenance, expiry, and retention state. Exclude candidates, rejected, false-positive, revoked, superseded, malformed, expired, and unauthorized records. (Database-authoritative validation method and source-inspection FK are implemented; API wiring pending.)
+- [ ] Validate every recalled record against the PostgreSQL memory ID, scope, workspace/agent authorization, schema version, integrity/hash, lifecycle status, provenance, expiry, and retention state. Exclude candidates, rejected, false-positive, revoked, superseded, malformed, expired, and unauthorized records. (API filters Walrus hits through PostgreSQL active status, exact blob reference, scope, fingerprint, and expiry.)
 - [ ] Treat recalled records as untrusted supporting evidence. They may add context or raise review, but may not remove current findings, supply missing source evidence, override policy, or independently force a decision.
 - [ ] If configured and warranted, run semantic review over bounded inspected content and selected structured memory features as untrusted data. Require schema-valid structured output. The model cannot promote memory, change policy, access tools, or execute actions.
 - [ ] Make the final explainable assessment and policy action only after initial detection and eligible recall. Keep detection status separate from `ALLOW`, `QUARANTINE`, and `REVIEW`; represent inconclusive and failed inspection explicitly.
-- [ ] Persist the assessment, evidence references, memory contribution, and audit event before returning the result.
+- [ ] Persist the assessment, evidence references, memory contribution, and audit event before returning the result. (Inspection and audit record are transactional; lifecycle write status is reported afterward.)
 - [ ] Create a candidate memory only from a policy-eligible finding. Never automatically promote it because of a detector or model result.
 
 ## Threat-memory lifecycle and authorization
 
 - [ ] Store typed, versioned, minimized records with category/technique, SIEVE-authored summary, behavioral features, safe fingerprint, source/evidence hashes, confidence rationale, scope, timestamps, Walrus reference, and expiry metadata.
 - [ ] Support `candidate → validated → active`, with terminal or non-retrievable `rejected`, `false_positive`, `revoked`, and `superseded` states.
-- [ ] Require an authenticated reviewer authorized for the record's scope to validate and separately promote a candidate. Persist reviewer identity, action, rationale, and timestamp.
+- [ ] Require an authenticated reviewer authorized for the record's scope to validate and separately promote a candidate. Persist reviewer identity, action, rationale, and timestamp. (OIDC review route and PostgreSQL audit writes implemented; real-provider promotion verification pending.)
 - [ ] Workspace reviewers can review only their workspace records. Agent-private records require the owning workspace's authorized reviewer. Cross-workspace reads and writes must fail closed.
 - [ ] Global promotion requires an explicitly configured global reviewer and documented privacy/provenance checks. Global records are read-only to workspace users and remain supporting evidence.
-- [ ] Use separate, deterministic Walrus namespaces for global, workspace, and agent scopes. Enforce authorization in PostgreSQL and the API as well: a namespace is not an onchain authorization boundary. (Namespace adapter exists; PostgreSQL-authoritative recall filter remains pending.)
+- [ ] Use separate, deterministic Walrus namespaces for global, workspace, and agent scopes. Enforce authorization in PostgreSQL and the API as well: a namespace is not an onchain authorization boundary. (Implemented in API: namespace adapter plus PostgreSQL ID/status/fingerprint/blob/scope/expiry checks; real Walrus provider round-trip pending.)
 - [ ] Add tests proving that a candidate cannot influence recall, a rejected/revoked record cannot influence assessment, and cross-workspace memory is never returned.
 
 ## Walrus privacy, access, and retention
@@ -32,20 +32,20 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 - [ ] Do not treat blob IDs as secrets. Keep API and delegate keys server-side and out of logs, responses, memory records, and fixtures.
 - [ ] Verify the configured relayer, Walrus Memory SDK/relayer compatibility, owner/account, delegate authorization, namespace behavior, encryption mode, and live signed read/write behavior before marking the integration available.
 - [ ] The current locked MemWal SDK is 0.1.12. In its default relayer-backed mode, the relayer receives plaintext for embedding and encryption before Walrus upload; select this mode only for the minimized threat record and document the relayer trust assumption.
-- [ ] Track Walrus `blob_id`, write/index status, `end_epoch`/`expires_at` where exposed, and last successful reconciliation in PostgreSQL. Treat `remember()` acceptance as pending; wait for confirmed storage/indexing before reporting success. (Adapter confirms with `rememberAndWait` and queries inventory; persistence/reconciliation remains pending.)
+- [ ] Track Walrus `blob_id`, write/index status, `end_epoch`/`expires_at` where exposed, and last successful reconciliation in PostgreSQL. Treat `remember()` acceptance as pending; wait for confirmed storage/indexing before reporting success. (Candidate writes persist job/blob/epoch/expiry state and query inventory; ongoing reconciliation and real provider verification remain pending.)
 - [ ] Verify renewal ownership and the supported renewal path. Do not promise automatic or permanent retention. The current SDK API exposes expiry metadata but no renewal method; until a verified renewal mechanism is implemented, surface expiry and operational remediation honestly.
 - [ ] Confirm deletion/forget behavior separately from blob expiry; do not claim a record is erased merely because its local metadata was revoked.
 
 ## Semantic-analysis safety
 
-- [ ] Label both source content and recalled memory as untrusted data in the model request. (Separate structured fields, no tools, and current-content evidence validation are implemented; endpoint integration pending.)
+- [ ] Label both source content and recalled memory as untrusted data in the model request. (Separate structured fields, no tools, and current-content evidence validation are integrated into direct inspection.)
 - [ ] Send only bounded fields, with no arbitrary tools or production secrets. Keep memory in a distinct structured field, never as privileged instructions.
 - [ ] Validate exact structured output, indexes, categories, rationale length, and consistency. Invalid output becomes inconclusive; it never promotes memory or returns a clean result.
 - [ ] Preserve deterministic findings if semantic analysis disagrees. The model may add context or mark uncertainty, but policy remains deterministic and server-owned.
 
 ## First complete vertical slice: restart-and-recall
 
-- [ ] A protected external agent submits direct content and provenance using the TypeScript SDK/API. (HTTP API implemented and tested; SDK remains pending.)
+- [ ] A protected external agent submits direct content and provenance using the TypeScript SDK/API. (HTTP API and candidate/review path implemented; SDK remains pending. Real Walrus read/write restart test pending.)
 - [ ] SIEVE detects a fixture attack and returns a structured, evidence-backed assessment with a quarantine/review decision.
 - [ ] The SDK example enforces that decision before the content enters agent context.
 - [ ] SIEVE writes a minimized candidate record to the real configured Walrus Memory integration; PostgreSQL records its operation and blob references.
@@ -59,9 +59,9 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 
 1. Baseline the `core` branch, dependencies, database, migrations, and current API behavior; preserve the frontend worker's files.
 2. Record architecture and checklist updates; agree the versioned inspection contract with the frontend owner.
-3. Extend PostgreSQL for workspaces, protected agents, scoped credentials, policies, general inspections, memory lifecycle/review, memory operations, and audit events through additive migrations. (Migration 0002 added; storage methods and integration verification pending.)
+3. Extend PostgreSQL for workspaces, protected agents, scoped credentials, policies, general inspections, memory lifecycle/review, memory operations, and audit events through additive migrations. (Migrations 0002–0003 and storage methods pass disposable PostgreSQL integration tests.)
 4. Add tested direct-content inspection and policy behavior independent of Tatum. (HTTP vertical slice implemented; SDK integration pending.)
-5. Add validated memory recall before final assessment, then controlled candidate write/review/promotion and real Walrus restart verification.
+5. Add validated memory recall before final assessment, then controlled candidate write/review/promotion and real Walrus restart verification. (API pipeline and lifecycle paths implemented; real provider verification pending.)
 6. Add TypeScript SDK and the enforcement example; integrate UI only after locating and coordinating its source.
 7. Measure memory-on/off behavior and false-positive controls; add Tatum/Sui as an adapter to the same inspection pipeline.
 

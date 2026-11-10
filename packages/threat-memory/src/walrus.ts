@@ -34,12 +34,16 @@ export type LifecycleMemoryHit = {
 export type WalrusBlobMetadata = { endEpoch: number | null; expiresAt: string | null };
 
 export async function namespaceForThreatScope(base: string, scope: ThreatMemoryScope): Promise<string> {
-  if (!/^[a-zA-Z0-9._-]{1,120}$/.test(base)) throw new Error("invalid_walrus_namespace");
-  if (scope.kind === "global") return `${base}-v1-global`;
+  if (!base.trim() || base.length > 255 || /[\u0000-\u001f]/.test(base)) throw new Error("invalid_walrus_namespace");
+  const baseHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(base));
+  const baseSuffix = [...new Uint8Array(baseHash)].map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 12);
+  const basePrefix = base.replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "sieve";
+  const namespaceBase = `${basePrefix}-${baseSuffix}`;
+  if (scope.kind === "global") return `${namespaceBase}-v1-global`;
   const source = scope.kind === "workspace" ? `workspace:${scope.workspaceId}` : `agent:${scope.workspaceId}:${scope.agentId}`;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
   const suffix = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 32);
-  return `${base}-v1-${scope.kind}-${suffix}`;
+  return `${namespaceBase}-v1-${scope.kind}-${suffix}`;
 }
 
 const categories = new Set<ThreatCategory>([
@@ -150,6 +154,7 @@ export class WalrusThreatMemory {
 
   async checkConnection(): Promise<void> {
     await this.client.health();
+    await this.client.recall({ query: "sieve signed access probe", limit: 1, namespace: this.namespace });
   }
 
   async store(decision: MemoryWriteDecision) {

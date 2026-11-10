@@ -11,11 +11,13 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `TATUM_NETWORK` | `testnet` (default) or `mainnet` |
 | `MEMWAL_ACCOUNT_ID` | Walrus Memory account used by SIEVE |
 | `MEMWAL_PRIVATE_KEY` | Delegate key for the SIEVE API; keep it server-side |
-| `MEMWAL_SERVER_URL` | Optional Walrus Memory relayer URL; defaults to the relayer for `TATUM_NETWORK` |
+| `MEMWAL_SERVER_URL` | Optional Walrus Memory relayer URL; defaults from `MEMWAL_NETWORK` |
+| `MEMWAL_NETWORK` | `testnet` (default) or `mainnet`; independent of the Sui/Tatum network |
 | `MEMWAL_NAMESPACE` | Optional namespace for SIEVE threat memories; defaults to `sieve-threat-memory` |
 | `AUTH_ISSUER` | OIDC issuer URL for API access tokens |
 | `AUTH_AUDIENCE` | Expected audience claim for API access tokens |
 | `AUTH_JWKS_URL` | HTTPS URL for the issuer's signing keys |
+| `GLOBAL_MEMORY_REVIEWER_USER_IDS` | Optional comma-separated application user IDs allowed to review global threat memory |
 | `METRICS_BEARER_TOKEN` | Optional, at least 32-character token protecting the Prometheus `/metrics` endpoint |
 | `OPENAI_API_KEY` | Optional server-side key for semantic classification of untrusted chain text |
 | `OPENAI_MODEL` | Required with `OPENAI_API_KEY`; model ID supporting Responses API Structured Outputs |
@@ -38,14 +40,19 @@ the SQL migrations and checks PostgreSQL when `DATABASE_URL` is configured.
 When configured, Tatum and Walrus readiness performs live provider health
 checks; credentials being present alone never reports a successful connection.
 
-The API writes a normalized threat-memory record only when the write policy
-accepts a strong detector signal backed by complete Tatum evidence. The original
-chain text is not sent to Walrus. The record is saved to PostgreSQL before the
-SDK call, and `rememberAndWait` uses content deduplication so retries do not
-create duplicate memories. Failed writes remain visible in the user's memory
-history and are retried when the case is retried. The SDK validates recalled
-records and marks them untrusted; the API does not yet use recalls in case
-assessments.
+The Sui case workflow remains a provider-specific evidence adapter. The general
+agent route below accepts direct text without Tatum. For a strong finding, it
+persists a minimized candidate linked to the content-hash-only inspection record.
+When Walrus is configured, it writes the candidate with `rememberAndWait`, checks
+inventory visibility and expiry, and reports candidate lifecycle and storage status
+separately. Candidates cannot affect recall. `POST /api/v1/threat-memories/{id}/review`
+requires an OIDC workspace owner/reviewer to validate and separately promote. A
+promotion writes a new active blob, confirms its expiry metadata, then updates the
+PostgreSQL authority. Direct inspection recalls only eligible scoped namespaces and
+accepts a hit only when its ID, active status, fingerprint, exact active blob, scope,
+and expiry match PostgreSQL. This path has mock-adapter and disposable-PostgreSQL
+tests; a signed round-trip against the configured real Walrus account is not yet
+verified.
 
 ## Local container deployment
 
@@ -110,33 +117,23 @@ threshold acceptance reporting.
 
 When `METRICS_BEARER_TOKEN` is configured, `GET /metrics` returns Prometheus text metrics for process uptime and memory, background-worker activity, and completed HTTP request counts by bounded route, method, and status. Scrape it with `Authorization: Bearer <token>`. The endpoint returns `404` when metrics are disabled and never emits request query strings, identifiers, or credentials. Keep the token in the deployment's secret store.
 
-Authenticated developers can provision an agent with `POST /api/v1/agents`; the
-`SIEVE agent credential` is returned once and only its SHA-256 verifier is stored.
-The agent submits direct text to `POST /api/v1/agent/inspect` with that credential
-and an `Idempotency-Key`. The route performs source-independent inspection, persists
-a content hash, findings, policy version, and decision, and returns `allow`, `review`,
-or `block` before the caller places content in trusted context. Raw inspected content
-and source references are not persisted. The TypeScript SDK and enforcement example
-remain pending. The route does not yet recall or write new lifecycle records to Walrus.
+Authenticated developers provision an agent with `POST /api/v1/agents`. Its
+256-bit `sieve_live_` credential is returned once; PostgreSQL stores only a
+SHA-256 verifier. Submit direct text to `POST /api/v1/agent/inspect` with that key
+and an `Idempotency-Key`. SIEVE inspects before the caller adds the content to
+trusted context, returns an evidence-backed `allow`, `review`, or `block` decision,
+and stores the content hash, findings, policy version, and decision. Raw inspected
+content and source references are not persisted. Strong findings create minimized,
+review-gated candidates; the configured Walrus adapter recalls contextual memories
+before the final assessment. The TypeScript SDK and enforcement example remain
+pending. Agent credential rotation/revocation and request rate limits also remain pending.
 
-Agent credential primitives now issue 256-bit `sieve_live_` secrets, expose the
-secret only at issuance, and derive a SHA-256 verifier for persistence. Provisioning,
-revocation, and request authentication through the database are still pending.
-
-Set `TEST_DATABASE_URL` to a disposable PostgreSQL database to run the optional
-agent credential and direct-inspection storage integration test.
-
-The Walrus lifecycle adapter now derives distinct namespace names for agent,
-workspace, and global scope and can inspect inventory metadata for a written blob's
-`end_epoch` and `expires_at`. Its contract tests use a mock SDK. The API does not yet
-cross-check recalled blob IDs against active PostgreSQL lifecycle records, so this
-adapter is not wired into decisions until that authorization seam is implemented.
-
-Validated records retain their review provenance after revocation or false-positive
-marking for audit purposes; terminal records remain excluded from recall.
-
-A tested candidate builder emits only fixed SIEVE-authored summaries, detector feature
-IDs, a content hash, bounded scope, and a 90-day local memory expiry. It is not yet
-connected to the inspection request lifecycle.
-
-PostgreSQL lifecycle methods now authorize reviewers per workspace and validate Walrus hits against active records and the exact promoted blob reference.
+Review a candidate through `POST /api/v1/threat-memories/{memoryId}/review` using
+OIDC. `validate` and `promote` are separate actions and both require a rationale. Reviewers can also reject, mark false positives, revoke, or supersede active records; those states are excluded from recall.
+Promotion is accepted only after a new Walrus blob and its expiry are confirmed.
+Global reviewers must be listed in `GLOBAL_MEMORY_REVIEWER_USER_IDS`; global
+validation also requires privacy review and verified corroboration from two
+workspaces. The optional database integration tests run only when
+`TEST_DATABASE_URL` points at a disposable PostgreSQL database. Walrus unit tests
+use a mock client; real provider behavior remains unverified until credentials are
+configured and a signed read/write is exercised.

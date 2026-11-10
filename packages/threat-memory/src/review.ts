@@ -6,7 +6,7 @@ export type MemoryReviewer = {
   canReviewGlobal: boolean;
 };
 
-export type MemoryReviewAction = "validate" | "promote" | "reject" | "mark_false_positive" | "revoke";
+export type MemoryReviewAction = "validate" | "promote" | "reject" | "mark_false_positive" | "revoke" | "supersede";
 export type MemoryReviewDetails = {
   rationale: string;
   privacyReviewed?: boolean;
@@ -70,6 +70,8 @@ export function reviewThreatMemory(
     status = "false_positive";
   } else if (action === "revoke" && !["rejected", "false_positive", "revoked", "superseded"].includes(memory.status)) {
     status = "revoked";
+  } else if (action === "supersede" && memory.status === "active") {
+    status = "superseded";
   } else {
     return { ok: false, reason: "invalid_transition" };
   }

@@ -168,3 +168,15 @@ test("revoked validated memory remains structurally valid but is not recallable"
   assert.equal(parseThreatMemory(revoked.memory)?.status, "revoked");
   assert.equal(canRecallThreatMemory(revoked.memory, { workspaceId: "ws_1", agentId: "agent_1", includeGlobal: false }, now), false);
 });
+
+test("an authorized reviewer can supersede active memory without leaving it recallable", () => {
+  const active = memory({
+    status: "active",
+    validation: { reviewerId: "user_1", reviewedAt: now, rationale: "Validated after evidence and privacy review.", privacyReviewed: false, corroboratingWorkspaceIds: [] },
+  });
+  const result = reviewThreatMemory(active, "supersede", workspaceReviewer, { rationale: "Replaced by a more precise validated defensive pattern." }, now);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(parseThreatMemory(result.memory)?.status, "superseded");
+  assert.equal(canRecallThreatMemory(result.memory, { workspaceId: "ws_1", agentId: "agent_1", includeGlobal: false }, now), false);
+});

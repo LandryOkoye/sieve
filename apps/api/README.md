@@ -122,7 +122,7 @@ Authenticated developers provision an agent with `POST /api/v1/agents`. Its
 SHA-256 verifier. Submit direct text to `POST /api/v1/agent/inspect` with that key
 and an `Idempotency-Key`. SIEVE inspects before the caller adds the content to
 trusted context, returns an evidence-backed `allow`, `review`, or `block` decision,
-and stores the content hash, findings, policy version, and decision. Raw inspected
+and stores the content hash, findings, policy version, and decision. Deterministic finding evidence includes start-inclusive/end-exclusive UTF-16 character offsets into the submitted content. Raw inspected
 content and source references are not persisted. Strong findings create minimized,
 review-gated candidates; the configured Walrus adapter recalls contextual memories
 before the final assessment. The TypeScript SDK client is available in `packages/sdk` and an enforcement example is in `examples/agent-enforcement.ts`. Workspace owners can rotate or revoke agent credentials at `/api/v1/agents/{agentId}/credentials/{rotate|revoke}`. Inspection credentials are limited to 60 requests per fixed process-local minute; multi-instance deployments require a shared limiter.

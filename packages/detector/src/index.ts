@@ -49,13 +49,15 @@ export function detect(
 
   for (const item of textItems) {
     for (const rule of rules) {
-      if (!rule.pattern.test(item.value)) continue;
+      const matcher = new RegExp(rule.pattern.source, `${rule.pattern.flags.replaceAll("g", "")}g`);
+      const match = matcher.exec(item.value);
+      if (!match) continue;
       findings.push({
         category: rule.category,
         signal: rule.signal,
         strength: rule.strength,
         rationale: rule.rationale,
-        evidence: item.evidence,
+        evidence: { ...item.evidence, startChar: match.index, endChar: match.index + match[0].length },
       });
     }
   }

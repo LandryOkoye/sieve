@@ -9,6 +9,8 @@ export type EvidencePointer = {
   objectId?: string;
   eventIndex?: number;
   contentSha256?: string;
+  startChar?: number;
+  endChar?: number;
 };
 
 export type ChainFact = {

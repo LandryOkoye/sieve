@@ -422,6 +422,10 @@ button { cursor: pointer; }
 .sidebar-note { background: #111512; border: 1px solid #222923; }
 .sidebar-note strong { color: #d8dfd8; }
 .sidebar-note p,.profile-info span { color: #858e86; }
+.sidebar-note { border-radius: 7px; }
+.sidebar-note p { max-width: 154px; line-height: 1.55; }
+.nav-link { letter-spacing: .005em; }
+.nav-link.active { border: 1px solid #29372a; }
 .sidebar-profile { border-top-color: #242925; }
 .avatar { color: #c3f887; background: #1c2a15; }
 .main-panel { background: radial-gradient(ellipse at 68% 0%, rgba(35,52,27,.12), transparent 40%), #080a09; }

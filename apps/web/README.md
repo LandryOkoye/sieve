@@ -51,6 +51,22 @@ When a strong finding creates a candidate, a workspace reviewer can enter a rati
 
 The signed-in dashboard opens on the agent-defense workflow and shows direct-content assessments from the current browser session. Sui case history is available separately as the first optional chain-evidence integration.
 
+## Product boundaries
+
+- The **Dashboard** and **Protect content** views use the general agent-defense API; neither requires a blockchain provider.
+- The API decides whether to allow, review, or block. Integrating agents must enforce that result before adding inspected material to trusted context.
+- Memory hits are supporting evidence only. The current inspection and server policy remain authoritative.
+- A detector-created candidate is not a trusted memory. Only an authorized reviewer can validate and then promote it.
+- Global, workspace, and agent memory scopes are enforced by the API; the browser does not grant access by selecting a scope.
+- The **Sui evidence** views fetch public Sui objects or transactions through the optional chain connector.
+- The **Sui memory activity** view describes legacy case-workflow writes. It is not the registry used for agent-memory recall.
+- Dashboard assessment history is held in page state and lasts only for the current browser session.
+- The web client does not expose API secrets or persist protected-agent credentials. Keep agent credentials in the integrating agent's secret store.
+- Optional semantic analysis receives untrusted content and returns structured findings; it cannot change memory lifecycle state or perform actions.
+- Do not submit system prompts, credentials, private conversations, or sensitive context unless the integration has explicit authorization to inspect them.
+- The console reports the server's assessment and policy decision; it does not claim that a no-signal result guarantees safe content.
+- Learning claims require the evaluation workflow to compare persistent-memory results against unseen variations and false-positive targets.
+
 Create an OAuth client of type **Web application** in Google Cloud. Add `http://localhost:5173` as an authorized JavaScript origin. Copy `apps/web/.env.example` to `apps/web/.env.local` and set `VITE_GOOGLE_CLIENT_ID` to the client ID. No client secret is used by the browser or API for this ID-token flow.
 
 Set these API values in the project root `.env` file. Docker Compose reads this file automatically; when running the API directly, export its variables into the shell before starting it:
@@ -65,11 +81,12 @@ Use the same OAuth client ID for `VITE_GOOGLE_CLIENT_ID` and `AUTH_AUDIENCE`. Th
 
 ## Available views
 
-- Overview and paginated inspection history
-- Sui object and transaction inspection
-- Case status, evidence provenance, findings, chain facts, quarantined text, and retry
-- Read-only threat memory history and normalized record detail
+- Agent-defense dashboard with service state and current-session assessment summaries
+- Protected-agent provisioning, direct-content inspection, policy decision, evidence spans, and candidate review actions
+- Sui object and transaction inspection as an optional evidence integration
+- Sui case status, provenance, findings, chain facts, quarantined text, and retry
+- Legacy Sui memory-write status, clearly separated from validated agent threat memory
 - Baseline, development, and frozen validation detector evaluations with persisted run history, category metrics, and acceptance-target status
 - Integration health and configuration status
 
-Threat memory creation remains unavailable until the controlled write workflow is implemented. Evaluation targets are at least 97% overall recall, at least 85% recall per category, and at most 10% false positives. Fixture choices distinguish baseline regression, development, and frozen validation runs. When the optional OpenAI judge is configured, evaluation fixture text is sent to that provider; run details identify the model used. The validation examples are stored in the repository and are not independent external validation or a safety certification. The client does not substitute sample records for live results.
+The agent screen can validate and promote a candidate returned by the current inspection. The API remains the authority for reviewer permissions, scope checks, and Walrus expiry. The UI does not yet list lifecycle candidates after leaving their assessment; it never treats the legacy Sui memory-write page as the reviewed agent-memory registry. Evaluation targets are at least 97% overall recall, at least 85% recall per category, and at most 10% false positives. Fixture choices distinguish baseline regression, development, and frozen validation runs. When the configured semantic judge is enabled, fixture text is sent to that provider; run details identify the model used. The validation examples are stored in the repository and are not independent external validation or a safety certification. The client does not substitute sample records for live results.

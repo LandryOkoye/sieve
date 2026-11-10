@@ -1,6 +1,6 @@
 import type { DetectionFinding, DetectorVerdict, ThreatCategory, UntrustedText } from "@sieve/contracts";
 export type { DetectionFinding, DetectorVerdict, ThreatCategory } from "@sieve/contracts";
-export { judgeUntrustedText, type SemanticJudgeConfig, type SemanticJudgeResult } from "./judge.js";
+export { judgeUntrustedText, type SemanticJudgeConfig, type SemanticJudgeResult, type SemanticMemoryContext } from "./judge.js";
 
 type Rule = {
   category: ThreatCategory;

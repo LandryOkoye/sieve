@@ -5,6 +5,31 @@ import { issueAgentCredential } from "../src/agent-credentials.js";
 import { reviewThreatMemory, type MemoryReviewer } from "@sieve/threat-memory/lifecycle";
 
 const url = process.env.TEST_DATABASE_URL;
+test("PostgreSQL credential rotation and revocation are owner-scoped and immediately enforced", { skip: !url }, async () => {
+  const db = new Database(url!);
+  try {
+    await db.migrate();
+    const owner = await db.resolveUserId("https://credential.invalid", crypto.randomUUID());
+    const initial = issueAgentCredential();
+    const agent = await db.createProtectedAgent(owner, "credential lifecycle agent", {
+      id: crypto.randomUUID(), tokenHash: initial.tokenHash, prefix: initial.prefix,
+    });
+    const stranger = await db.resolveUserId("https://credential.invalid", crypto.randomUUID());
+    const next = issueAgentCredential();
+    assert.equal(await db.rotateAgentCredential(stranger, agent.id, {
+      id: crypto.randomUUID(), tokenHash: next.tokenHash, prefix: next.prefix,
+    }), false);
+    assert.equal((await db.authenticateAgent(initial.tokenHash, "inspect"))?.id, agent.id);
+    assert.equal(await db.rotateAgentCredential(owner, agent.id, {
+      id: crypto.randomUUID(), tokenHash: next.tokenHash, prefix: next.prefix,
+    }), true);
+    assert.equal(await db.authenticateAgent(initial.tokenHash, "inspect"), null);
+    assert.equal((await db.authenticateAgent(next.tokenHash, "inspect"))?.id, agent.id);
+    assert.equal(await db.revokeAgentCredentials(owner, agent.id), true);
+    assert.equal(await db.authenticateAgent(next.tokenHash, "inspect"), null);
+  } finally { await db.close(); }
+});
+
 test("PostgreSQL agent credentials and direct inspections are scoped and idempotent", { skip: !url }, async () => {
   const db = new Database(url!);
   try {

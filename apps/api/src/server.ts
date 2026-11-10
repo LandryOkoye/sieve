@@ -5,6 +5,7 @@ import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
 import { hashAgentCredential, issueAgentCredential, readAgentBearer } from "./agent-credentials.js";
 import { inspectForAgent } from "./agent-service.js";
+import { FixedWindowRateLimiter } from "./rate-limit.js";
 import { createThreatMemoryCandidate } from "./memory-candidates.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect, judgeUntrustedText } from "@sieve/detector";
@@ -21,6 +22,7 @@ const walrusMemory = config.walrusMemory ? new WalrusMemoryClient(config.walrusM
 let databaseInitialized = false;
 let queueWorkerBusy = false;
 const requestCounts = new Map<string, number>();
+const agentInspectionLimiter = new FixedWindowRateLimiter(60, 60_000);
 
 async function ensureDatabase(): Promise<Database> {
   if (!database) throw new Error("Database is not configured");
@@ -43,6 +45,7 @@ function metricsRoute(request: IncomingMessage): string {
   if (path === "/api/v1/health/live" || path === "/api/v1/health/ready" || path === "/metrics") return path;
   if (path === "/api/v1/me") return path;
   if (path === "/api/v1/agents") return path;
+  if (/^\/api\/v1\/agents\/[0-9a-f-]{36}\/credentials\/(rotate|revoke)$/i.test(path)) return "/api/v1/agents/:id/credentials";
   if (path === "/api/v1/agent/inspect") return path;
   if (/^\/api\/v1\/threat-memories\/[0-9a-f-]{36}\/review$/i.test(path)) return "/api/v1/threat-memories/:id/review";
   if (path === "/api/v1/cases") return path;
@@ -175,6 +178,12 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       sendJson(response, 401, { error: "invalid_agent_credential" });
       return;
     }
+    const rate = agentInspectionLimiter.consume(tokenHash);
+    if (!rate.allowed) {
+      response.setHeader("retry-after", String(rate.retryAfterSeconds));
+      sendJson(response, 429, { error: "agent_rate_limit_exceeded", retryAfterSeconds: rate.retryAfterSeconds });
+      return;
+    }
     if (typeof requestIdHeader !== "string") {
       sendJson(response, 400, { error: "idempotency_key_required" });
       return;
@@ -287,6 +296,26 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
           id: randomUUID(), tokenHash: credential.tokenHash, prefix: credential.prefix,
         });
         sendJson(response, 201, { agent, credential: { secret: credential.secret, prefix: credential.prefix } });
+        return;
+      }
+      const credentialManagement = requestUrl.pathname.match(/^\/api\/v1\/agents\/([0-9a-f-]{36})\/credentials\/(rotate|revoke)$/i);
+      if (request.method === "POST" && credentialManagement) {
+        if (requestUrl.search || Number(request.headers["content-length"] ?? 0) > 0 || request.headers["transfer-encoding"]) {
+          sendJson(response, 400, { error: "credential_management_body_not_allowed" });
+          return;
+        }
+        const [, agentId, action] = credentialManagement;
+        if (action?.toLowerCase() === "rotate") {
+          const credential = issueAgentCredential();
+          const rotated = await store.rotateAgentCredential(userId, agentId!, {
+            id: randomUUID(), tokenHash: credential.tokenHash, prefix: credential.prefix,
+          });
+          if (!rotated) { sendJson(response, 404, { error: "agent_not_found" }); return; }
+          sendJson(response, 200, { credential: { secret: credential.secret, prefix: credential.prefix } });
+          return;
+        }
+        const revoked = await store.revokeAgentCredentials(userId, agentId!);
+        sendJson(response, revoked ? 200 : 404, revoked ? { revoked: true } : { error: "agent_not_found" });
         return;
       }
       const reviewMatch = requestUrl.pathname.match(/^\/api\/v1\/threat-memories\/([0-9a-f-]{36})\/review$/i);

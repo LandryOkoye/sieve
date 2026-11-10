@@ -131,6 +131,58 @@ export class Database {
     return row ? { id: row.id, workspaceId: row.workspace_id, name: row.name, policy: asJsonObject(row.policy), policyVersion: row.policy_version } : null;
   }
 
+  async rotateAgentCredential(userId: string, agentId: string, credential: { id: string; tokenHash: string; prefix: string }): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const agent = await client.query<{ workspace_id: string }>(
+        `SELECT a.workspace_id FROM protected_agents a JOIN workspace_members m ON m.workspace_id = a.workspace_id
+         WHERE a.id = $1 AND m.user_id = $2 AND m.role = 'owner' AND a.status = 'active' FOR UPDATE OF a`,
+        [agentId, userId],
+      );
+      const row = agent.rows[0];
+      if (!row) { await client.query("ROLLBACK"); return false; }
+      await client.query("UPDATE agent_credentials SET revoked_at = now() WHERE agent_id = $1 AND revoked_at IS NULL", [agentId]);
+      await client.query(
+        `INSERT INTO agent_credentials (id, workspace_id, agent_id, token_hash, token_prefix, scopes)
+         VALUES ($1, $2, $3, $4, $5, ARRAY['inspect'])`,
+        [credential.id, row.workspace_id, agentId, credential.tokenHash, credential.prefix],
+      );
+      await client.query(
+        `INSERT INTO agent_audit_events (id, workspace_id, agent_id, actor_user_id, event_type)
+         VALUES ($1, $2, $3, $4, 'agent.credential_rotated')`, [randomUUID(), row.workspace_id, agentId, userId],
+      );
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async revokeAgentCredentials(userId: string, agentId: string): Promise<boolean> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const agent = await client.query<{ workspace_id: string }>(
+        `SELECT a.workspace_id FROM protected_agents a JOIN workspace_members m ON m.workspace_id = a.workspace_id
+         WHERE a.id = $1 AND m.user_id = $2 AND m.role = 'owner' FOR UPDATE OF a`, [agentId, userId],
+      );
+      const row = agent.rows[0];
+      if (!row) { await client.query("ROLLBACK"); return false; }
+      await client.query("UPDATE agent_credentials SET revoked_at = COALESCE(revoked_at, now()) WHERE agent_id = $1", [agentId]);
+      await client.query(
+        `INSERT INTO agent_audit_events (id, workspace_id, agent_id, actor_user_id, event_type)
+         VALUES ($1, $2, $3, $4, 'agent.credentials_revoked')`, [randomUUID(), row.workspace_id, agentId, userId],
+      );
+      await client.query("COMMIT");
+      return true;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
+  }
+
   async saveDirectInspection(input: DirectInspectionInput): Promise<{ inspection: StoredDirectInspection; created: boolean } | { conflict: true }> {
     const client = await this.pool.connect();
     try {

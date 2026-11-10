@@ -13,6 +13,7 @@ export type ApiConfig = {
   walrusMemory: WalrusMemoryConfig | undefined;
   suiNetwork: "mainnet" | "testnet";
   auth: OidcConfig | undefined;
+  globalMemoryReviewerUserIds: readonly string[];
   integrations: {
     database: IntegrationStatus;
     authentication: IntegrationStatus;
@@ -102,6 +103,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     : undefined;
 
   const walrusServerUrl = environment.MEMWAL_SERVER_URL;
+  const walrusNetwork = environment.MEMWAL_NETWORK ?? "testnet";
+  if (walrusNetwork !== "testnet" && walrusNetwork !== "mainnet") {
+    throw new Error("MEMWAL_NETWORK must be either testnet or mainnet");
+  }
   if (walrusServerUrl) {
     const parsedWalrusUrl = new URL(walrusServerUrl);
     if (parsedWalrusUrl.protocol !== "https:" && parsedWalrusUrl.protocol !== "http:") {
@@ -121,7 +126,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     ? {
         accountId: walrusAccountId,
         delegateKey: walrusDelegateKey,
-        serverUrl: walrusServerUrl || (network === "mainnet"
+        serverUrl: walrusServerUrl || (walrusNetwork === "mainnet"
           ? "https://relayer.memory.walrus.xyz"
           : "https://relayer-staging.memory.walrus.xyz"),
         namespace: walrusNamespace,
@@ -147,6 +152,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     auth = { issuer: oidcIssuer, audience: oidcAudience, jwksUrl: jwksUrl.toString() };
   }
 
+  const globalMemoryReviewerUserIds = (environment.GLOBAL_MEMORY_REVIEWER_USER_IDS ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  if (globalMemoryReviewerUserIds.some((id) => !/^[0-9a-f-]{36}$/i.test(id)) || new Set(globalMemoryReviewerUserIds).size !== globalMemoryReviewerUserIds.length) {
+    throw new Error("GLOBAL_MEMORY_REVIEWER_USER_IDS must be a comma-separated list of distinct application user IDs");
+  }
+
   return {
     port: parsePort(environment.API_PORT),
     databaseUrl: environment.DATABASE_URL,
@@ -156,6 +166,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): ApiCon
     walrusMemory,
     suiNetwork: network,
     auth,
+    globalMemoryReviewerUserIds,
     integrations: {
       database: integrationStatus(Boolean(environment.DATABASE_URL)),
       authentication: integrationStatus(Boolean(auth)),

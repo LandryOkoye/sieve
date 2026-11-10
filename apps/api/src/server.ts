@@ -1,12 +1,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { loadConfig } from "./config.js";
 import { Database } from "./database.js";
 import { OidcAuthenticator, type AuthenticatedPrincipal } from "./auth.js";
+import { hashAgentCredential, issueAgentCredential, readAgentBearer } from "./agent-credentials.js";
+import { inspectForAgent } from "./agent-service.js";
+import { FixedWindowRateLimiter } from "./rate-limit.js";
+import { createThreatMemoryCandidate } from "./memory-candidates.js";
 import { TatumSuiClient, normalizeObjectId, validateTarget } from "@sieve/chain-sui";
 import { detect, judgeUntrustedText } from "@sieve/detector";
 import { authorizeMemoryWrite } from "@sieve/threat-memory/policy";
 import { WalrusThreatMemory as WalrusMemoryClient } from "@sieve/threat-memory/walrus";
+import { reviewThreatMemory, type MemoryReviewAction, type MemoryReviewer } from "@sieve/threat-memory/lifecycle";
 import { baselineFixtureSetVersion, fixtureSetVersions, runEvaluation } from "@sieve/evaluation";
 import type { ChainFact, EvaluationDetectorConfig, EvidenceBundle, InspectionCase, LookupTarget, SuiNetwork, UntrustedText } from "@sieve/contracts";
 
@@ -17,6 +22,7 @@ const walrusMemory = config.walrusMemory ? new WalrusMemoryClient(config.walrusM
 let databaseInitialized = false;
 let queueWorkerBusy = false;
 const requestCounts = new Map<string, number>();
+const agentInspectionLimiter = new FixedWindowRateLimiter(60, 60_000);
 
 async function ensureDatabase(): Promise<Database> {
   if (!database) throw new Error("Database is not configured");
@@ -38,6 +44,10 @@ function metricsRoute(request: IncomingMessage): string {
   const path = new URL(request.url ?? "/", "http://localhost").pathname;
   if (path === "/api/v1/health/live" || path === "/api/v1/health/ready" || path === "/metrics") return path;
   if (path === "/api/v1/me") return path;
+  if (path === "/api/v1/agents") return path;
+  if (/^\/api\/v1\/agents\/[0-9a-f-]{36}\/credentials\/(rotate|revoke)$/i.test(path)) return "/api/v1/agents/:id/credentials";
+  if (path === "/api/v1/agent/inspect") return path;
+  if (/^\/api\/v1\/threat-memories\/[0-9a-f-]{36}\/review$/i.test(path)) return "/api/v1/threat-memories/:id/review";
   if (path === "/api/v1/cases") return path;
   if (/^\/api\/v1\/cases\/[0-9a-f-]{36}\/retry$/i.test(path)) return "/api/v1/cases/:id/retry";
   if (/^\/api\/v1\/cases\/[0-9a-f-]{36}$/i.test(path)) return "/api/v1/cases/:id";
@@ -152,8 +162,94 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return;
   }
 
+  if (requestUrl.pathname === "/api/v1/agent/inspect") {
+    if (request.method !== "POST") {
+      sendJson(response, 405, { error: "method_not_allowed" });
+      return;
+    }
+    if (!database) {
+      sendJson(response, 503, { error: "database_not_configured" });
+      return;
+    }
+    const bearer = readAgentBearer(request.headers.authorization);
+    const tokenHash = bearer ? hashAgentCredential(bearer) : null;
+    const requestIdHeader = request.headers["idempotency-key"];
+    if (!tokenHash) {
+      sendJson(response, 401, { error: "invalid_agent_credential" });
+      return;
+    }
+    const rate = agentInspectionLimiter.consume(tokenHash);
+    if (!rate.allowed) {
+      response.setHeader("retry-after", String(rate.retryAfterSeconds));
+      sendJson(response, 429, { error: "agent_rate_limit_exceeded", retryAfterSeconds: rate.retryAfterSeconds });
+      return;
+    }
+    if (typeof requestIdHeader !== "string") {
+      sendJson(response, 400, { error: "idempotency_key_required" });
+      return;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = await readJsonBody(request, 400_000);
+    } catch {
+      sendJson(response, 400, { error: "invalid_json_body" });
+      return;
+    }
+    try {
+      const store = await ensureDatabase();
+      const result = await inspectForAgent({
+        store,
+        tokenHash,
+        requestId: requestIdHeader,
+        body,
+        recall: async (query, agent) => {
+          if (!walrusMemory) return [];
+          const scope = { workspaceId: agent.workspaceId, agentId: agent.id, includeGlobal: agent.policy.includeGlobalMemory === true };
+          const hits = await walrusMemory.recallLifecycleRecords(query, scope, 8);
+          return store.authorizeRecalledMemories(agent, scope, hits, new Date().toISOString());
+        },
+        ...(config.semanticJudge ? {
+          semanticReview: (items, memories) => judgeUntrustedText(items, config.semanticJudge!, memories),
+        } : {}),
+        afterAssessment: async ({ inspectionId, agent, contentHash, sourceType, at, findings }) => {
+          const candidates: Array<{ id: string; status: string; storageStatus?: string }> = [];
+          for (const finding of findings.filter((item) => item.strength === "strong")) {
+            const record = createThreatMemoryCandidate({ finding, scope: { kind: "agent", workspaceId: agent.workspaceId, agentId: agent.id }, contentHash, sourceType, now: at });
+            const persisted = await store.createThreatMemoryCandidate(record, inspectionId);
+            let status = persisted.walrusStatus;
+            if (status !== "stored" && walrusMemory && ["candidate", "validated"].includes(persisted.memory.status)) {
+              try {
+                const walrusCandidate = { ...persisted.memory, status: "candidate" as const, validation: null };
+                const write = await walrusMemory.storeLifecycleRecord(walrusCandidate);
+                const expiresAt = write.metadata?.expiresAt;
+                const endEpoch = write.metadata?.endEpoch;
+                if (expiresAt && endEpoch !== null && endEpoch !== undefined && Date.parse(expiresAt) > Date.now()) {
+                  await store.completeLifecycleMemoryWrite(persisted.memory.id, write.jobId, write.blobId, endEpoch, expiresAt);
+                  status = "stored";
+                } else {
+                  await store.failLifecycleMemoryWrite(persisted.memory.id);
+                  status = "failed";
+                }
+              } catch {
+                await store.failLifecycleMemoryWrite(persisted.memory.id);
+                status = "failed";
+              }
+            }
+            candidates.push({ id: persisted.memory.id, status: persisted.memory.status, storageStatus: status });
+          }
+          return candidates;
+        },
+      });
+      sendJson(response, result.status, result.body);
+    } catch {
+      sendJson(response, 503, { error: "agent_inspection_unavailable" });
+    }
+    return;
+  }
+
   const isProtectedRoute =
     (request.method === "GET" && requestUrl.pathname === "/api/v1/me") ||
+    requestUrl.pathname.startsWith("/api/v1/agents") ||
     requestUrl.pathname.startsWith("/api/v1/cases") ||
     requestUrl.pathname.startsWith("/api/v1/threat-memories") ||
     requestUrl.pathname.startsWith("/api/v1/evaluations");
@@ -180,6 +276,126 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       const userId = await store.resolveUserId(principal.issuer, principal.subject);
       if (requestUrl.pathname === "/api/v1/me") {
         sendJson(response, 200, { userId });
+        return;
+      }
+      if (request.method === "POST" && requestUrl.pathname === "/api/v1/agents") {
+        let body: Record<string, unknown>;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          sendJson(response, 400, { error: "invalid_json_body" });
+          return;
+        }
+        if (Object.keys(body).some((key) => key !== "name") || typeof body.name !== "string" ||
+            body.name.trim().length < 1 || body.name.trim().length > 120) {
+          sendJson(response, 400, { error: "invalid_agent_request" });
+          return;
+        }
+        const credential = issueAgentCredential();
+        const agent = await store.createProtectedAgent(userId, body.name.trim(), {
+          id: randomUUID(), tokenHash: credential.tokenHash, prefix: credential.prefix,
+        });
+        sendJson(response, 201, { agent, credential: { secret: credential.secret, prefix: credential.prefix } });
+        return;
+      }
+      const credentialManagement = requestUrl.pathname.match(/^\/api\/v1\/agents\/([0-9a-f-]{36})\/credentials\/(rotate|revoke)$/i);
+      if (request.method === "POST" && credentialManagement) {
+        if (requestUrl.search || Number(request.headers["content-length"] ?? 0) > 0 || request.headers["transfer-encoding"]) {
+          sendJson(response, 400, { error: "credential_management_body_not_allowed" });
+          return;
+        }
+        const [, agentId, action] = credentialManagement;
+        if (action?.toLowerCase() === "rotate") {
+          const credential = issueAgentCredential();
+          const rotated = await store.rotateAgentCredential(userId, agentId!, {
+            id: randomUUID(), tokenHash: credential.tokenHash, prefix: credential.prefix,
+          });
+          if (!rotated) { sendJson(response, 404, { error: "agent_not_found" }); return; }
+          sendJson(response, 200, { credential: { secret: credential.secret, prefix: credential.prefix } });
+          return;
+        }
+        const revoked = await store.revokeAgentCredentials(userId, agentId!);
+        sendJson(response, revoked ? 200 : 404, revoked ? { revoked: true } : { error: "agent_not_found" });
+        return;
+      }
+      const reviewMatch = requestUrl.pathname.match(/^\/api\/v1\/threat-memories\/([0-9a-f-]{36})\/review$/i);
+      if (request.method === "POST" && reviewMatch) {
+        let body: Record<string, unknown>;
+        try {
+          body = await readJsonBody(request);
+        } catch {
+          sendJson(response, 400, { error: "invalid_json_body" });
+          return;
+        }
+        const allowedFields = ["action", "rationale", "privacyReviewed", "corroboratingWorkspaceIds"];
+        const actions: readonly MemoryReviewAction[] = ["validate", "promote", "reject", "mark_false_positive", "revoke", "supersede"];
+        if (Object.keys(body).some((key) => !allowedFields.includes(key)) || !actions.includes(body.action as MemoryReviewAction) ||
+            typeof body.rationale !== "string" || (body.privacyReviewed !== undefined && typeof body.privacyReviewed !== "boolean") ||
+            (body.corroboratingWorkspaceIds !== undefined && (!Array.isArray(body.corroboratingWorkspaceIds) ||
+              body.corroboratingWorkspaceIds.length > 20 || body.corroboratingWorkspaceIds.some((id) => typeof id !== "string")))) {
+          sendJson(response, 400, { error: "invalid_memory_review_request" });
+          return;
+        }
+        const action = body.action as MemoryReviewAction;
+        const canReviewGlobal = config.globalMemoryReviewerUserIds.includes(userId);
+        const current = await store.getThreatMemoryForReview(userId, reviewMatch[1]!, canReviewGlobal);
+        if (!current) {
+          sendJson(response, 404, { error: "threat_memory_not_found" });
+          return;
+        }
+        const corroboratingWorkspaceIds = body.corroboratingWorkspaceIds as string[] | undefined;
+        if (action === "validate" && current.memory.scope.kind === "global" &&
+            !(await store.hasGlobalMemoryCorroboration(current.memory.safeFingerprint, corroboratingWorkspaceIds ?? []))) {
+          sendJson(response, 400, { error: "global_memory_corroboration_required" });
+          return;
+        }
+        const reviewer: MemoryReviewer = {
+          userId,
+          workspaceIds: current.memory.scope.kind === "global" ? [] : [current.memory.scope.workspaceId],
+          canReviewGlobal,
+        };
+        const details = { rationale: body.rationale, privacyReviewed: body.privacyReviewed === true, corroboratingWorkspaceIds: corroboratingWorkspaceIds ?? [] };
+        const reviewed = reviewThreatMemory(current.memory, action, reviewer, details, new Date().toISOString());
+        if (!reviewed.ok) {
+          sendJson(response, 400, { error: reviewed.reason });
+          return;
+        }
+
+        let walrus: { blobId: string; endEpoch: number; expiresAt: string } | undefined;
+        if (action === "promote") {
+          if (current.walrusStatus !== "stored" || !walrusMemory) {
+            sendJson(response, 409, { error: "memory_not_durably_stored" });
+            return;
+          }
+          try {
+            const uploaded = await walrusMemory.storeLifecycleRecord(reviewed.memory);
+            const endEpoch = uploaded.metadata?.endEpoch;
+            const expiresAt = uploaded.metadata?.expiresAt;
+            if (!expiresAt || endEpoch === null || endEpoch === undefined || Date.parse(expiresAt) <= Date.now()) {
+              sendJson(response, 503, { error: "walrus_expiry_unverified" });
+              return;
+            }
+            walrus = { blobId: uploaded.blobId, endEpoch, expiresAt };
+          } catch {
+            sendJson(response, 503, { error: "walrus_promotion_unavailable" });
+            return;
+          }
+        }
+        const saved = await store.saveThreatMemoryReview({
+          memory: reviewed.memory,
+          action,
+          reviewerId: userId,
+          canReviewGlobal,
+          rationale: body.rationale,
+          details,
+          expectedStatus: current.memory.status,
+          ...(walrus ? walrus : {}),
+        });
+        if (!saved) {
+          sendJson(response, 409, { error: "memory_state_changed" });
+          return;
+        }
+        sendJson(response, 200, { id: reviewed.memory.id, status: reviewed.memory.status, walrusExpiresAt: walrus?.expiresAt ?? null });
         return;
       }
       if (request.method === "POST" && requestUrl.pathname === "/api/v1/cases") {
@@ -325,13 +541,13 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
   sendJson(response, 404, { error: "not_found" });
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJsonBody(request: IncomingMessage, maximumBytes = 16_384): Promise<Record<string, unknown>> {
   let size = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > 16_384) throw new Error("Request body too large");
+    if (size > maximumBytes) throw new Error("Request body too large");
     chunks.push(buffer);
   }
   const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));

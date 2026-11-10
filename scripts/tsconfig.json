@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "../apps/api/node_modules/@types"
+    ]
+  },
+  "include": [
+    "evaluate-memory-on-off.ts"
+  ]
+}

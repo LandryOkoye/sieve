@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: SIEVE API
   version: 0.1.0
-  description: Authenticated Sui evidence inspection and case history.
+  description: General AI-agent defense API. Direct content inspection is independent of blockchain providers; Sui evidence is an optional integration.
 servers:
   - url: /
 security:
@@ -38,6 +38,92 @@ paths:
                 properties:
                   userId: { type: string }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+  /api/v1/agents:
+    post:
+      summary: Provision a protected agent and one-time API credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 120 }
+      responses:
+        '201':
+          description: Agent created. The credential secret is returned only once.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [agent, credential]
+                properties:
+                  agent: { type: object }
+                  credential:
+                    type: object
+                    required: [secret, prefix]
+                    properties:
+                      secret: { type: string, writeOnly: true }
+                      prefix: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /api/v1/agents/{agentId}/credentials/rotate:
+    post:
+      summary: Rotate an agent credential and revoke all previous credentials
+      parameters:
+        - in: path
+          name: agentId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: New credential secret returned once. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { description: Agent not found or caller is not its workspace owner. }
+  /api/v1/agents/{agentId}/credentials/revoke:
+    post:
+      summary: Revoke every active credential for an agent
+      parameters:
+        - in: path
+          name: agentId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Agent credentials revoked. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { description: Agent not found or caller is not its workspace owner. }
+  /api/v1/agent/inspect:
+    post:
+      security:
+        - agentBearer: []
+      summary: Inspect direct content before it enters an agent's trusted context
+      description: Submitted content is inspected in memory and only its SHA-256 hash, bounded findings, and policy decision are persisted.
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 1, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 65536 }
+                sourceType: { type: string, maxLength: 80, default: direct_content }
+                sourceRef: { type: string, maxLength: 2048, description: Hashed before persistence }
+      responses:
+        '201': { description: Evidence-backed assessment and enforced action created. }
+        '200': { description: Existing assessment returned for an idempotent replay. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { description: Idempotency key was reused with different content or provenance. }
+        '429': { description: Per-credential request limit exceeded; retry after the indicated interval. }
+        '503': { description: Inspection dependencies are unavailable. }
   /api/v1/cases:
     post:
       summary: Queue a Sui object or transaction inspection
@@ -166,6 +252,39 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ThreatMemoryWrite' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/threat-memories/{memoryId}/review:
+    parameters:
+      - in: path
+        name: memoryId
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Review or promote a scoped threat-memory candidate
+      description: Requires an authorized workspace reviewer. Promotion uploads a fresh active record and verifies Walrus expiry before changing PostgreSQL state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, rationale]
+              properties:
+                action: { type: string, enum: [validate, promote, reject, mark_false_positive, revoke, supersede] }
+                rationale: { type: string, minLength: 12, maxLength: 500 }
+                privacyReviewed: { type: boolean }
+                corroboratingWorkspaceIds:
+                  type: array
+                  maxItems: 20
+                  uniqueItems: true
+                  items: { type: string }
+      responses:
+        '200':
+          description: Review transition persisted with reviewer identity and rationale.
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Lifecycle state changed or the candidate is not durably stored. }
+        '503': { description: Walrus promotion or expiry verification is unavailable. }
   /api/v1/evaluations:
     post:
       summary: Start a fixture-based detector evaluation
@@ -233,6 +352,10 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+    agentBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: SIEVE agent credential
   responses:
     Unauthenticated:
       description: A valid bearer token is required.

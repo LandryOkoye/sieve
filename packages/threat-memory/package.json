@@ -5,7 +5,10 @@
   "type": "module",
   "exports": {
     "./policy": "./src/policy.ts",
-    "./walrus": "./src/walrus.ts"
+    "./walrus": "./src/walrus.ts",
+    "./records": "./src/records.ts",
+    "./review": "./src/review.ts",
+    "./lifecycle": "./src/lifecycle.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -11,11 +11,13 @@ The API listens on port `3001` by default. Set `API_PORT` to change it.
 | `TATUM_NETWORK` | `testnet` (default) or `mainnet` |
 | `MEMWAL_ACCOUNT_ID` | Walrus Memory account used by SIEVE |
 | `MEMWAL_PRIVATE_KEY` | Delegate key for the SIEVE API; keep it server-side |
-| `MEMWAL_SERVER_URL` | Optional Walrus Memory relayer URL; defaults to the relayer for `TATUM_NETWORK` |
+| `MEMWAL_SERVER_URL` | Optional Walrus Memory relayer URL; defaults from `MEMWAL_NETWORK` |
+| `MEMWAL_NETWORK` | `testnet` (default) or `mainnet`; independent of the Sui/Tatum network |
 | `MEMWAL_NAMESPACE` | Optional namespace for SIEVE threat memories; defaults to `sieve-threat-memory` |
 | `AUTH_ISSUER` | OIDC issuer URL for API access tokens |
 | `AUTH_AUDIENCE` | Expected audience claim for API access tokens |
 | `AUTH_JWKS_URL` | HTTPS URL for the issuer's signing keys |
+| `GLOBAL_MEMORY_REVIEWER_USER_IDS` | Optional comma-separated application user IDs allowed to review global threat memory |
 | `METRICS_BEARER_TOKEN` | Optional, at least 32-character token protecting the Prometheus `/metrics` endpoint |
 | `OPENAI_API_KEY` | Optional server-side key for semantic classification of untrusted chain text |
 | `OPENAI_MODEL` | Required with `OPENAI_API_KEY`; model ID supporting Responses API Structured Outputs |
@@ -81,14 +83,19 @@ the SQL migrations and checks PostgreSQL when `DATABASE_URL` is configured.
 When configured, Tatum and Walrus readiness performs live provider health
 checks; credentials being present alone never reports a successful connection.
 
-The API writes a normalized threat-memory record only when the write policy
-accepts a strong detector signal backed by complete Tatum evidence. The original
-chain text is not sent to Walrus. The record is saved to PostgreSQL before the
-SDK call, and `rememberAndWait` uses content deduplication so retries do not
-create duplicate memories. Failed writes remain visible in the user's memory
-history and are retried when the case is retried. The SDK validates recalled
-records and marks them untrusted; the API does not yet use recalls in case
-assessments.
+The Sui case workflow remains a provider-specific evidence adapter. The general
+agent route below accepts direct text without Tatum. For a strong finding, it
+persists a minimized candidate linked to the content-hash-only inspection record.
+When Walrus is configured, it writes the candidate with `rememberAndWait`, checks
+inventory visibility and expiry, and reports candidate lifecycle and storage status
+separately. Candidates cannot affect recall. `POST /api/v1/threat-memories/{id}/review`
+requires an OIDC workspace owner/reviewer to validate and separately promote. A
+promotion writes a new active blob, confirms its expiry metadata, then updates the
+PostgreSQL authority. Direct inspection recalls only eligible scoped namespaces and
+accepts a hit only when its ID, active status, fingerprint, exact active blob, scope,
+and expiry match PostgreSQL. This path has mock-adapter and disposable-PostgreSQL
+tests; a signed round-trip against the configured real Walrus account is not yet
+verified.
 
 ## Local container deployment
 
@@ -116,8 +123,10 @@ The deterministic detector works without an LLM. To enable the semantic judge,
 configure a provider key and model pair: `OPENAI_API_KEY` with `OPENAI_MODEL`,
 `GROQ_API_KEY` with `GROQ_MODEL`, or `NVIDIA_API_KEY` with `NVIDIA_MODEL`.
 When multiple providers are configured, select one with
-`SEMANTIC_JUDGE_PROVIDER`. The API sends bounded, extracted chain text with
-strict JSON Schema output and no tools. OpenAI requests use the Responses API
+`SEMANTIC_JUDGE_PROVIDER`. The API sends bounded inspected text and, when present, minimized recalled memory in
+separate fields as untrusted data, with strict JSON Schema output and no tools. Memory
+can inform classification but cannot independently establish an attack, promote a record,
+change policy, or execute an action. OpenAI requests use the Responses API
 and disable response storage; Groq requests use its Responses API and omit the
 unsupported `store` parameter; NVIDIA requests use its Chat Completions API and
 `response_format` JSON Schema. NVIDIA currently documents JSON Schema output
@@ -150,3 +159,24 @@ threshold acceptance reporting.
 ## Operational metrics
 
 When `METRICS_BEARER_TOKEN` is configured, `GET /metrics` returns Prometheus text metrics for process uptime and memory, background-worker activity, and completed HTTP request counts by bounded route, method, and status. Scrape it with `Authorization: Bearer <token>`. The endpoint returns `404` when metrics are disabled and never emits request query strings, identifiers, or credentials. Keep the token in the deployment's secret store.
+
+Authenticated developers provision an agent with `POST /api/v1/agents`. Its
+256-bit `sieve_live_` credential is returned once; PostgreSQL stores only a
+SHA-256 verifier. Submit direct text to `POST /api/v1/agent/inspect` with that key
+and an `Idempotency-Key`. SIEVE inspects before the caller adds the content to
+trusted context, returns an evidence-backed `allow`, `review`, or `block` decision,
+and stores the content hash, findings, policy version, and decision. Direct assessments use detector version `rules-v3` (or `rules-v3+semantic`) and deterministic finding evidence includes start-inclusive/end-exclusive UTF-16 character offsets into the submitted content. Raw inspected
+content and source references are not persisted. Strong findings create minimized,
+review-gated candidates; the configured Walrus adapter recalls contextual memories
+before the final assessment. The TypeScript SDK client is available in `packages/sdk` and an enforcement example is in `examples/agent-enforcement.ts`. Workspace owners can rotate or revoke agent credentials at `/api/v1/agents/{agentId}/credentials/{rotate|revoke}`. Inspection credentials are limited to 60 requests per fixed process-local minute; multi-instance deployments require a shared limiter.
+
+Review a candidate through `POST /api/v1/threat-memories/{memoryId}/review` using
+OIDC. `validate` and `promote` are separate actions and both require a rationale. Reviewers can also reject, mark false positives, revoke, or supersede active records; those states are excluded from recall.
+Promotion is accepted only after a new Walrus blob and its expiry are confirmed.
+Global reviewers must be listed in `GLOBAL_MEMORY_REVIEWER_USER_IDS`; global
+validation also requires privacy review and verified corroboration from two
+workspaces. The optional database integration tests run only when
+`TEST_DATABASE_URL` points at a disposable PostgreSQL database. Run
+`pnpm --filter @sieve/api evaluate:memory` for persistent-memory-on/off metrics; it
+requires a provisioned agent, live Walrus, and the configured semantic judge. The live
+evaluation has not yet been run against real provider credentials.

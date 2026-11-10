@@ -2,7 +2,7 @@
 
 PostgreSQL stores user identity references, inspection cases, assessment revisions, Walrus write state, evaluation runs, and audit events. Walrus remains the durable cross-session memory store; this database records application ownership and operation state.
 
-The first migration is transactional SQL. Apply migrations in ascending filename order and record each applied filename in the deployment's migration process. The API must scope every case and memory-reference query to the authenticated user ID.
+The first migration is transactional SQL. Apply migrations in ascending filename order and record each applied filename in the deployment's migration process. The API must scope every case, workspace, agent, credential, inspection, and memory-reference query to the authenticated identity and resource scope.
 
 `app_users` stores an external identity issuer and subject, not credentials. The authentication provider remains a deployment choice. Case evidence is stored as JSONB so refreshes and retries can recover the same provenance bundle; define retention and deletion behavior before production deployment.
 
@@ -64,3 +64,13 @@ bash scripts/restore-database.sh ./sieve-backup.dump
 After restore, start the candidate API against that database and confirm readiness and representative case, memory-status, and evaluation records before cutover. Keep backups encrypted and access-controlled in remote storage, define retention, and rehearse restores on the deployment's PostgreSQL version. The scripts do not upload, encrypt, or delete backups.
 
 Migrations are forward-only; there are no down migrations. Roll back an application release only when its code remains compatible with the applied schema. Otherwise restore to a separate database and cut over after validation, or apply a corrective forward migration. Never roll back by dropping production tables.
+
+
+Migration `0002_agent_defense.sql` adds workspaces, protected agents, hashed revocable agent credentials, content-hash-only direct inspection records, scoped threat-memory lifecycle metadata, review events, and agent audit events. Direct inspections have a 30-day metadata expiry; they intentionally have no raw-content column. Deployment must run an expiry cleanup job and configure retention for WAL-backed records separately.
+
+
+Migration `0003_threat_memory_source_inspection.sql` links each candidate to the persisted direct-inspection record and makes candidate creation idempotent per inspection and safe fingerprint.
+
+The PostgreSQL recall authorization method uses the database record as authority: a Walrus hit is eligible only when its memory ID, active lifecycle status, current blob ID, fingerprint, scope, and local Walrus expiry match the stored record and requesting agent. The adapter alone is never an authorization decision.
+
+Migration `0004_memory_supersede_action.sql` permits an authorized reviewer to supersede an active record while preserving its audit history and excluding it from recall.

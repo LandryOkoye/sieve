@@ -118,44 +118,59 @@ function ConnectScreen({ onConnect, clientId, message }: {
   return <main className="landing-screen">
     <header className="landing-nav">
       <a className="landing-brand" href="#" aria-label="SIEVE home"><img src="/sieve-neon-logo.png" alt="SIEVE" /></a>
-      <span className="landing-nav-note"><i /> SUI EVIDENCE INTELLIGENCE</span>
-      <span className="landing-version">READ ONLY <b>·</b> MAINNET / TESTNET</span>
+      <span className="landing-nav-note"><i /> DEFENSE INFRASTRUCTURE FOR AI AGENTS</span>
+      <span className="landing-version">EVIDENCE FIRST <b>·</b> SUI INTEGRATION</span>
     </header>
     <section className="landing-hero">
       <div className="landing-copy">
-        <p className="landing-kicker"><span>01</span> / VERIFY WHAT YOUR AGENT SEES</p>
-        <h1>Trust the evidence.<br /><em>Question the text.</em></h1>
-        <p className="landing-description">SIEVE inspects on-chain evidence, isolates manipulative content, and shows you exactly why a signal was raised.</p>
+        <p className="landing-kicker"><span>01</span> / DEFENSE BETWEEN CONTENT AND CONTEXT</p>
+        <h1>Keep untrusted content<br />out of your agent’s <em>context.</em></h1>
+        <p className="landing-description">SIEVE lets an AI agent inspect content before it trusts it. It returns an evidence-backed allow, review, or block decision, with validated threat memory as supporting context.</p>
         <div className="landing-actions">
           {clientId ? <div className={`landing-signin ${busy ? 'is-busy' : ''}`} aria-busy={busy}><GoogleSignInButton clientId={clientId} onCredential={acceptGoogleCredential} onError={(signInError) => setError(signInError.message)} /></div> : <p className="inline-error" role="status">Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID for the web app.</p>}
-          <span className="landing-action-note"><Icon name="lock" size={13} /> Secure, read-only workspace</span>
+          <span className="landing-action-note"><Icon name="lock" size={13} /> Inspect first. Trust by policy.</span>
         </div>
+        <a className="landing-learn" href="#workflow">See how the defense loop works <Icon name="arrow" size={14} /></a>
         {error && <div className="inline-error" role="alert">{error}</div>}
         {message && <div className="inline-error" role="status">{message}</div>}
       </div>
-      <div className="landing-visual" aria-label="SIEVE separates chain facts from untrusted text">
-        <div className="visual-topline"><span>INSPECTION PIPELINE</span><span>LIVE / SUI</span></div>
-        <pre className="sieve-ascii" aria-hidden="true">{`   ┌────────────────────────┐
-   │   S U I   E V I D E N C E │
-   └───────────┬────────────┘
-               │
-       .  .  .  ▼  .  .  .
-      ╭──────────────────╮
-      │  / / / / / / / / │
-      │  / / S I E V E / │
-      │  / / / / / / / / │
-      ╰───┬──────────┬───╯
-          │          └──────╴  QUARANTINED TEXT
-          └─────────────────  VERIFIED FACTS`}</pre>
-        <div className="visual-bottom"><span><i className="signal-dot" /> EVIDENCE BOUNDARY ACTIVE</span><span>0x7A…9F2C</span></div>
+      <div className="landing-visual" aria-label="SIEVE assesses current evidence before content enters an agent context">
+        <div className="visual-topline"><span>AGENT DEFENSE PIPELINE</span><span>DETECT / RECALL / DECIDE</span></div>
+        <pre className="sieve-ascii" aria-hidden="true">{`  ┌─────────────────────────────────────┐
+  │  UNTRUSTED CONTENT  +  LIVE EVIDENCE │
+  └──────────────────┬──────────────────┘
+                     ▼
+       ┌─────────────────────────────┐
+       │          S I E V E          │
+       │  detect  →  recall  →  policy│
+       │  evidence leads; memory aids │
+       └──────────┬───────────┬──────┘
+                  │           │
+                ALLOW      REVIEW / BLOCK
+                  │           │
+           AGENT CONTEXT   QUARANTINE`}</pre>
+        <div className="visual-bottom"><span><i className="signal-dot" /> CURRENT EVIDENCE STAYS IN CHARGE</span><span>MEMORY = CONTEXT</span></div>
       </div>
     </section>
     <section className="landing-principles" aria-label="SIEVE principles">
-      <article><span>01</span><div><strong>Fresh evidence</strong><p>Every finding starts with data fetched from Sui.</p></div></article>
-      <article><span>02</span><div><strong>Text stays inert</strong><p>Descriptions and event text are isolated as untrusted.</p></div></article>
-      <article><span>03</span><div><strong>Uncertainty is visible</strong><p>Partial results are called out, never mistaken for clean.</p></div></article>
+      <article><span>01</span><div><strong>Evidence leads</strong><p>Assess the content in front of the agent, not a remembered claim.</p></div></article>
+      <article><span>02</span><div><strong>Memory is earned</strong><p>Threat patterns stay pending until an authorized reviewer validates them.</p></div></article>
+      <article><span>03</span><div><strong>Decisions are enforceable</strong><p>Give agents a clear allow, review, or block result before trusted context.</p></div></article>
     </section>
-    <footer className="landing-footer"><span>© SIEVE — EVIDENCE INTELLIGENCE</span><span>YOUR AGENT'S READ PATH, MADE VISIBLE <b>↗</b></span></footer>
+    <section className="landing-workflow" id="workflow" aria-labelledby="workflow-title">
+      <div className="landing-section-heading"><p className="landing-kicker"><span>02</span> / A DEFENSE LOOP AGENTS CAN ENFORCE</p><h2 id="workflow-title">One check before trust.</h2><p>Inspect the incoming material, add only validated context, then enforce the decision where your agent builds its context.</p></div>
+      <div className="workflow-grid">
+        <article><span className="workflow-number">01</span><div className="workflow-mark"><Icon name="scan" size={20} /></div><h3>Inspect</h3><p>Submit direct content or evidence from a connected source. SIEVE identifies current signals and keeps evidence references attached.</p><span className="workflow-meta">DIRECT CONTENT · OPTIONAL SUI EVIDENCE</span></article>
+        <article><span className="workflow-number">02</span><div className="workflow-mark"><Icon name="memory" size={20} /></div><h3>Recall with limits</h3><p>Validated threat memory can add context. Scope, status, expiry, and policy are checked before a record can be used.</p><span className="workflow-meta">SCOPED · REVIEW-GATED · EXPIRING</span></article>
+        <article><span className="workflow-number">03</span><div className="workflow-mark"><Icon name="shield" size={20} /></div><h3>Enforce</h3><p>Your integration receives a structured decision and keeps review or blocked content out of trusted agent context.</p><span className="workflow-meta">ALLOW · REVIEW · BLOCK</span></article>
+      </div>
+    </section>
+    <section className="landing-memory" aria-label="Threat memory validation lifecycle">
+      <div className="memory-copy"><p className="landing-kicker"><span>03</span> / LEARNING WITH A TRUST BOUNDARY</p><h2>Suspicion is a starting point.<br /><em>Trust takes review.</em></h2><p>New observations become candidates, not instant intelligence. An authorized reviewer validates and promotes a record before it can be recalled. Private conversations, system prompts, credentials, and raw inspected content do not belong in threat memory.</p></div>
+      <div className="memory-lifecycle"><span className="lifecycle-label">THREAT MEMORY LIFECYCLE</span><div><b>Candidate</b><i>→</i><b>Validated</b><i>→</i><b className="lifecycle-active">Active</b></div><p><span /> Only active, in-scope, unexpired records can support a new assessment.</p></div>
+    </section>
+    <section className="landing-evidence-note"><div><span className="evidence-note-icon"><Icon name="shield" size={19} /></span><div><strong>Built for agents. Sui is the first evidence connector.</strong><p>SIEVE’s inspection model works with direct content independently of any blockchain provider. The Sui integration adds chain evidence when an agent needs it.</p></div></div><span className="evidence-note-tag">PROVIDER-INDEPENDENT CORE</span></section>
+    <footer className="landing-footer"><span>© SIEVE — AGENT DEFENSE INFRASTRUCTURE</span><span>YOUR AGENT'S TRUST BOUNDARY, MADE VISIBLE <b>↗</b></span></footer>
   </main>
 }
 
@@ -336,7 +351,7 @@ function Overview({ cases, stats, loading, onOpen, onLoadMore, nextCursor, loadi
   onOpen: (destination: Page) => void; onLoadMore: () => void; nextCursor: string | null; loadingMore: boolean
 }) {
   return <>
-    <section className="page-heading heading-row"><div><p className="eyebrow">SECURITY OBSERVABILITY <span>•</span> SUI NETWORK</p><h1>Evidence intelligence</h1><p className="page-subtitle">A clear view of what your agent reads, what it should distrust, and why.</p></div><button className="button button-primary" onClick={() => onOpen({ name: 'inspect' })}><Icon name="scan" /> Inspect evidence</button></section>
+    <section className="page-heading heading-row"><div><p className="eyebrow">SECURITY OBSERVABILITY <span>•</span> SUI EVIDENCE CONNECTOR</p><h1>Evidence intelligence</h1><p className="page-subtitle">Review Sui evidence inspections here. SIEVE’s direct-content agent defense works independently of this chain integration.</p></div><button className="button button-primary" onClick={() => onOpen({ name: 'inspect' })}><Icon name="scan" /> Inspect evidence</button></section>
     <section className="metrics-grid" aria-label="Inspection summary">
       <Metric label="Inspections" value={loading ? '—' : stats.total.toLocaleString()} detail="Cases in this workspace" icon="scan" tone="mint" />
       <Metric label="Signals detected" value={loading ? '—' : stats.flagged.toString()} detail="Evidence with manipulation signals" icon="alert" tone="coral" />
@@ -351,8 +366,8 @@ function Overview({ cases, stats, loading, onOpen, onLoadMore, nextCursor, loadi
       </section>
       <aside className="trust-panel">
         <div className="trust-panel-top"><div className="trust-icon"><Icon name="shield" size={20} /></div><span className="trust-label">TRUST BOUNDARY</span></div>
-        <h2>Evidence stays evidence.</h2><p>Every assessment is grounded in fresh chain data. Descriptions and event text remain quarantined as untrusted content.</p>
-        <div className="trust-steps"><div className="trust-step"><span className="step-check">1</span><div><strong>Fetch from chain</strong><span>Source and network recorded</span></div></div><div className="trust-step"><span className="step-check">2</span><div><strong>Separate text from facts</strong><span>Attacker controlled content stays inert</span></div></div><div className="trust-step"><span className="step-check">3</span><div><strong>Report uncertainty</strong><span>Missing evidence is never a clean result</span></div></div></div>
+        <h2>Current evidence leads.</h2><p>Chain facts and attacker-controlled text stay distinct. Validated threat memory can add context, but it cannot replace current evidence or policy.</p>
+        <div className="trust-steps"><div className="trust-step"><span className="step-check">1</span><div><strong>Fetch the source</strong><span>Network and provenance recorded</span></div></div><div className="trust-step"><span className="step-check">2</span><div><strong>Assess the content</strong><span>Untrusted text cannot issue instructions</span></div></div><div className="trust-step"><span className="step-check">3</span><div><strong>Enforce the decision</strong><span>Uncertainty stays visible</span></div></div></div>
         <button className="text-button trust-link" onClick={() => onOpen({ name: 'settings' })}>View system status <Icon name="arrow" size={14} /></button>
       </aside>
     </div>

@@ -9,7 +9,9 @@
     "start": "tsx src/server.ts",
     "test": "tsx --test test/*.test.ts",
     "evaluate:validation": "tsx ../../scripts/evaluate-held-out.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "evaluate:memory": "tsx ../../scripts/evaluate-memory-on-off.ts",
+    "typecheck:evaluate-memory": "tsc --noEmit -p ../../scripts/tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

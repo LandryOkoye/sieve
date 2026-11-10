@@ -53,7 +53,7 @@ This checklist follows [ADR 0001](adr/0001-typescript-modular-monolith.md) and t
 - [ ] Restart the API. Submit a related, previously unseen paraphrase. Initial detection runs, then validated memory is recalled and independently scope/status checked before final policy.
 - [ ] The response explains the recalled memory's supporting contribution while retaining fresh evidence as the basis for the finding.
 - [ ] Submit benign lookalikes and show that memory similarity alone does not cause quarantine.
-- [ ] Run the same held-out fixtures with memory off and on. Report dataset version, prior exposure, precision, recall, false positives/negatives, per-category results, memory hits, and limitations. Claim improvement only when measured results support it.
+- [ ] Run the same held-out fixtures with memory off and on. Report dataset version, prior exposure, precision, recall, false positives/negatives, per-category results, memory hits, and limitations. Claim improvement only when measured results support it. (Evaluator and live command implemented; real Walrus/semantic run pending.)
 
 ## Dependency-aware delivery order
 

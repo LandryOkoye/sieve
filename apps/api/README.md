@@ -133,6 +133,7 @@ Promotion is accepted only after a new Walrus blob and its expiry are confirmed.
 Global reviewers must be listed in `GLOBAL_MEMORY_REVIEWER_USER_IDS`; global
 validation also requires privacy review and verified corroboration from two
 workspaces. The optional database integration tests run only when
-`TEST_DATABASE_URL` points at a disposable PostgreSQL database. Walrus unit tests
-use a mock client; real provider behavior remains unverified until credentials are
-configured and a signed read/write is exercised.
+`TEST_DATABASE_URL` points at a disposable PostgreSQL database. Run
+`pnpm --filter @sieve/api evaluate:memory` for persistent-memory-on/off metrics; it
+requires a provisioned agent, live Walrus, and the configured semantic judge. The live
+evaluation has not yet been run against real provider credentials.

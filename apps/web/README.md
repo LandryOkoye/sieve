@@ -29,6 +29,8 @@ The browser API helpers expose this flow:
 
 The **Protect content** screen provisions a key or accepts an existing agent key, submits direct content, and presents the server-owned decision with current-content findings. It shows memory hits as context and new observations as pending candidates, never as trusted memory.
 
+The signed-in dashboard opens on the agent-defense workflow and shows direct-content assessments from the current browser session. Sui case history is available separately as the first optional chain-evidence integration.
+
 Create an OAuth client of type **Web application** in Google Cloud. Add `http://localhost:5173` as an authorized JavaScript origin. Copy `apps/web/.env.example` to `apps/web/.env.local` and set `VITE_GOOGLE_CLIENT_ID` to the client ID. No client secret is used by the browser or API for this ID-token flow.
 
 Set these API values in the project root `.env` file. Docker Compose reads this file automatically; when running the API directly, export its variables into the shell before starting it:

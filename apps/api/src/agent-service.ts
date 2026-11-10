@@ -76,7 +76,7 @@ export async function inspectForAgent(input: {
     action,
     findings: assessment.verdict.findings,
     memoryIds: assessment.memories.map((memory) => memory.id),
-    detectorVersion: input.semanticReview ? "rules-v2+semantic" : "rules-v2",
+    detectorVersion: input.semanticReview ? "rules-v3+semantic" : "rules-v3",
     policyVersion: agent.policyVersion,
   });
   if ("conflict" in stored) return { status: 409, body: { error: "idempotency_key_conflict" } };

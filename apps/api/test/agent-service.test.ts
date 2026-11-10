@@ -26,6 +26,9 @@ test("agent inspection returns evidence-backed decision and persists only conten
   assert.equal(result.status, 201);
   assert.equal((result.body.decision as { action: string }).action, "block");
   assert.equal(result.body.contentHash.length, 64);
+  const saved = store.writes[0] as { detectorVersion: string; findings: Array<{ evidence: { startChar?: number; endChar?: number } }> };
+  assert.equal(saved.detectorVersion, "rules-v3");
+  assert.equal(saved.findings[0]?.evidence.endChar, "Ignore previous instructions".length);
   assert.equal(JSON.stringify(store.writes).includes("Ignore previous instructions"), false);
 });
 

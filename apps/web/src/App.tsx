@@ -2,16 +2,20 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import type { DetectorVerdict, EvaluationRun, InspectionCase, SuiNetwork, ThreatMemoryWrite } from '@sieve/contracts'
 import { api, readableApiError, type Health } from './api'
 import { renderGoogleSignInButton } from './google-auth'
+import type { AgentAssessmentSummary } from './agent-contract'
+import { AgentOverview } from './AgentOverview'
+import { AgentProtectionPage } from './AgentProtection'
 import './App.css'
 
-type Page = { name: 'overview' | 'inspect' | 'memory' | 'evaluations' | 'settings' | 'case'; caseId?: string }
+type Page = { name: 'overview' | 'inspect' | 'sui' | 'sui-inspect' | 'memory' | 'evaluations' | 'settings' | 'case'; caseId?: string }
 type NavName = Exclude<Page['name'], 'case'>
 const googleIdTokenStorageKey = 'sieve_google_id_token'
 
 const navItems: { name: NavName; label: string; icon: string }[] = [
-  { name: 'overview', label: 'Overview', icon: 'grid' },
-  { name: 'inspect', label: 'Inspect', icon: 'scan' },
-  { name: 'memory', label: 'Threat memory', icon: 'memory' },
+  { name: 'overview', label: 'Dashboard', icon: 'grid' },
+  { name: 'inspect', label: 'Protect content', icon: 'scan' },
+  { name: 'sui', label: 'Sui evidence', icon: 'shield' },
+  { name: 'memory', label: 'Sui memory activity', icon: 'memory' },
   { name: 'evaluations', label: 'Evaluations', icon: 'chart' },
 ]
 
@@ -36,7 +40,7 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
 function pageFromHash(): Page {
   const [route, caseId] = window.location.hash.replace(/^#\/?/, '').split('/')
   if (route === 'case' && caseId) return { name: 'case', caseId }
-  if (route === 'inspect' || route === 'memory' || route === 'evaluations' || route === 'settings') return { name: route }
+  if (route === 'sui' || route === 'sui-inspect' || route === 'inspect' || route === 'memory' || route === 'evaluations' || route === 'settings') return { name: route }
   return { name: 'overview' }
 }
 
@@ -115,24 +119,62 @@ function ConnectScreen({ onConnect, clientId, message }: {
     setError('')
     try { await onConnect(idToken) } catch (cause) { setError(readableApiError(cause)) } finally { setBusy(false) }
   }
-  return <main className="auth-screen">
-    <div className="auth-orbit orbit-one" /><div className="auth-orbit orbit-two" />
-    <div className="auth-mark"><span className="brand-mark">S</span><span>SIEVE</span><span className="brand-caption">EVIDENCE INTELLIGENCE</span></div>
-    <section className="auth-card">
-      <div className="auth-icon"><Icon name="lock" size={21} /></div>
-      <p className="eyebrow">SECURE WORKSPACE</p>
-      <h1>Connect to SIEVE</h1>
-      <p className="auth-copy">Sign in with your Google account to open your inspection workspace.</p>
-      {clientId
-        ? <div className={busy ? 'google-signin-wrap is-busy' : 'google-signin-wrap'} aria-busy={busy}>
-          <GoogleSignInButton clientId={clientId} onCredential={acceptGoogleCredential} onError={(signInError) => setError(signInError.message)} />
+  return <main className="landing-screen">
+    <header className="landing-nav">
+      <a className="landing-brand" href="#" aria-label="SIEVE home"><img src="/sieve-neon-logo.png" alt="SIEVE" /></a>
+      <span className="landing-nav-note"><i /> DEFENSE INFRASTRUCTURE FOR AI AGENTS</span>
+      <span className="landing-version">EVIDENCE FIRST <b>·</b> SUI INTEGRATION</span>
+    </header>
+    <section className="landing-hero">
+      <div className="landing-copy">
+        <p className="landing-kicker"><span>01</span> / DEFENSE BETWEEN CONTENT AND CONTEXT</p>
+        <h1>Keep untrusted content<br />out of your agent’s <em>context.</em></h1>
+        <p className="landing-description">SIEVE lets an AI agent inspect content before it trusts it. It returns an evidence-backed allow, review, or block decision, with validated threat memory as supporting context.</p>
+        <div className="landing-actions">
+          {clientId ? <div className={`landing-signin ${busy ? 'is-busy' : ''}`} aria-busy={busy}><GoogleSignInButton clientId={clientId} onCredential={acceptGoogleCredential} onError={(signInError) => setError(signInError.message)} /></div> : <p className="inline-error" role="status">Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID for the web app.</p>}
+          <span className="landing-action-note"><Icon name="lock" size={13} /> Inspect first. Trust by policy.</span>
         </div>
-        : <p className="inline-error" role="status">Google Sign-In is not configured. Set VITE_GOOGLE_CLIENT_ID for the web app.</p>}
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      {message && <div className="inline-error" role="status">{message}</div>}
-      <p className="auth-footnote"><Icon name="lock" size={13} /> SIEVE validates your Google identity on the server.</p>
+        <a className="landing-learn" href="#workflow">See how the defense loop works <Icon name="arrow" size={14} /></a>
+        {error && <div className="inline-error" role="alert">{error}</div>}
+        {message && <div className="inline-error" role="status">{message}</div>}
+      </div>
+      <div className="landing-visual" aria-label="SIEVE assesses current evidence before content enters an agent context">
+        <div className="visual-topline"><span>AGENT DEFENSE PIPELINE</span><span>DETECT / RECALL / DECIDE</span></div>
+        <pre className="sieve-ascii" aria-hidden="true">{`  ┌─────────────────────────────────────┐
+  │  UNTRUSTED CONTENT  +  LIVE EVIDENCE │
+  └──────────────────┬──────────────────┘
+                     ▼
+       ┌─────────────────────────────┐
+       │          S I E V E          │
+       │  detect  →  recall  →  policy│
+       │  evidence leads; memory aids │
+       └──────────┬───────────┬──────┘
+                  │           │
+                ALLOW      REVIEW / BLOCK
+                  │           │
+           AGENT CONTEXT   QUARANTINE`}</pre>
+        <div className="visual-bottom"><span><i className="signal-dot" /> CURRENT EVIDENCE STAYS IN CHARGE</span><span>MEMORY = CONTEXT</span></div>
+      </div>
     </section>
-    <p className="auth-bottom">Read-only access · Sui mainnet and testnet</p>
+    <section className="landing-principles" aria-label="SIEVE principles">
+      <article><span>01</span><div><strong>Evidence leads</strong><p>Assess the content in front of the agent, not a remembered claim.</p></div></article>
+      <article><span>02</span><div><strong>Memory is earned</strong><p>Threat patterns stay pending until an authorized reviewer validates them.</p></div></article>
+      <article><span>03</span><div><strong>Decisions are enforceable</strong><p>Give agents a clear allow, review, or block result before trusted context.</p></div></article>
+    </section>
+    <section className="landing-workflow" id="workflow" aria-labelledby="workflow-title">
+      <div className="landing-section-heading"><p className="landing-kicker"><span>02</span> / A DEFENSE LOOP AGENTS CAN ENFORCE</p><h2 id="workflow-title">One check before trust.</h2><p>Inspect the incoming material, add only validated context, then enforce the decision where your agent builds its context.</p></div>
+      <div className="workflow-grid">
+        <article><span className="workflow-number">01</span><div className="workflow-mark"><Icon name="scan" size={20} /></div><h3>Inspect</h3><p>Submit direct content or evidence from a connected source. SIEVE identifies current signals and keeps evidence references attached.</p><span className="workflow-meta">DIRECT CONTENT · OPTIONAL SUI EVIDENCE</span></article>
+        <article><span className="workflow-number">02</span><div className="workflow-mark"><Icon name="memory" size={20} /></div><h3>Recall with limits</h3><p>Validated threat memory can add context. Scope, status, expiry, and policy are checked before a record can be used.</p><span className="workflow-meta">SCOPED · REVIEW-GATED · EXPIRING</span></article>
+        <article><span className="workflow-number">03</span><div className="workflow-mark"><Icon name="shield" size={20} /></div><h3>Enforce</h3><p>Your integration receives a structured decision and keeps review or blocked content out of trusted agent context.</p><span className="workflow-meta">ALLOW · REVIEW · BLOCK</span></article>
+      </div>
+    </section>
+    <section className="landing-memory" aria-label="Threat memory validation lifecycle">
+      <div className="memory-copy"><p className="landing-kicker"><span>03</span> / LEARNING WITH A TRUST BOUNDARY</p><h2>Suspicion is a starting point.<br /><em>Trust takes review.</em></h2><p>New observations become candidates, not instant intelligence. An authorized reviewer validates and promotes a record before it can be recalled. Private conversations, system prompts, credentials, and raw inspected content do not belong in threat memory.</p></div>
+      <div className="memory-lifecycle"><span className="lifecycle-label">THREAT MEMORY LIFECYCLE</span><div><b>Candidate</b><i>→</i><b>Validated</b><i>→</i><b className="lifecycle-active">Active</b></div><p><span /> Only active, in-scope, unexpired records can support a new assessment.</p></div>
+    </section>
+    <section className="landing-evidence-note"><div><span className="evidence-note-icon"><Icon name="shield" size={19} /></span><div><strong>Built for agents. Sui is the first evidence connector.</strong><p>SIEVE’s inspection model works with direct content independently of any blockchain provider. The Sui integration adds chain evidence when an agent needs it.</p></div></div><span className="evidence-note-tag">PROVIDER-INDEPENDENT CORE</span></section>
+    <footer className="landing-footer"><span>© SIEVE — AGENT DEFENSE INFRASTRUCTURE</span><span>YOUR AGENT'S TRUST BOUNDARY, MADE VISIBLE <b>↗</b></span></footer>
   </main>
 }
 
@@ -152,6 +194,7 @@ function App() {
   const [health, setHealth] = useState<Health | null>(null)
   const [currentCase, setCurrentCase] = useState<InspectionCase | null>(null)
   const [caseError, setCaseError] = useState('')
+  const [recentAgentAssessments, setRecentAgentAssessments] = useState<AgentAssessmentSummary[]>([])
   const loadedOlderCases = useRef(false)
 
   useEffect(() => {
@@ -184,7 +227,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!token || authState !== 'connected') return
+    if (!token || authState !== 'connected' || !['sui', 'sui-inspect', 'case'].includes(page.name)) return
     let alive = true
     const refresh = async () => {
       try {
@@ -204,7 +247,7 @@ function App() {
     void refresh()
     const interval = window.setInterval(() => { void refresh() }, 5000)
     return () => { alive = false; window.clearInterval(interval) }
-  }, [token, authState])
+  }, [token, authState, page.name])
 
   useEffect(() => {
     if (page.name !== 'case' || !page.caseId || !token || authState !== 'connected') return
@@ -229,9 +272,14 @@ function App() {
 
   function navigate(destination: Page) {
     setCaseError('')
+    if (['sui', 'sui-inspect', 'case'].includes(destination.name)) setLoadingCases(true)
     const hash = destination.name === 'case' ? `#/case/${destination.caseId}` : destination.name === 'overview' ? '#/' : `#/${destination.name}`
     if (window.location.hash === hash) setPage(destination)
     else window.location.hash = hash
+  }
+
+  function recordAgentAssessment(summary: AgentAssessmentSummary) {
+    setRecentAgentAssessments((previous) => [summary, ...previous.filter((item) => item.id !== summary.id)].slice(0, 10))
   }
 
   async function connect(idToken: string) {
@@ -249,6 +297,7 @@ function App() {
     setToken('')
     setUserId('')
     setCases([])
+    setRecentAgentAssessments([])
     setAuthState('disconnected')
   }
 
@@ -279,30 +328,32 @@ function App() {
   if (authState === 'checking') return <LoadingScreen />
   if (authState === 'disconnected') return <ConnectScreen onConnect={connect} clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim() || undefined} message={globalError} />
 
-  const pageTitle = page.name === 'case' ? 'Inspection detail' : ({ overview: 'Overview', inspect: 'Inspect evidence', memory: 'Threat memory', evaluations: 'Evaluations', settings: 'Settings' } as Record<string, string>)[page.name]
+  const pageTitle = page.name === 'case' ? 'Sui inspection detail' : ({ overview: 'Dashboard', inspect: 'Protect content', sui: 'Sui evidence', 'sui-inspect': 'Inspect Sui evidence', memory: 'Sui memory activity', evaluations: 'Evaluations', settings: 'Settings' } as Record<string, string>)[page.name]
   return <div className="app-shell">
     <aside className="sidebar">
-      <button className="brand-lockup" onClick={() => navigate({ name: 'overview' })} aria-label="SIEVE overview"><span className="brand-mark">S</span><span className="brand-word">SIEVE<span className="brand-period">.</span></span></button>
+      <button className="brand-lockup" onClick={() => navigate({ name: 'overview' })} aria-label="SIEVE overview"><img className="sidebar-logo" src="/sieve-neon-logo.png" alt="SIEVE" /></button>
       <div className="workspace-label">WORKSPACE</div>
       <nav className="main-nav" aria-label="Main navigation">
-        {navItems.map((item) => <button key={item.name} className={`nav-link ${page.name === item.name || (item.name === 'overview' && page.name === 'case') ? 'active' : ''}`} onClick={() => navigate({ name: item.name })}><Icon name={item.icon} /><span>{item.label}</span>{item.name === 'memory' && <span className="nav-soon">SOON</span>}</button>)}
+        {navItems.map((item) => <button key={item.name} className={`nav-link ${page.name === item.name || (item.name === 'sui' && ['sui-inspect', 'case'].includes(page.name)) ? 'active' : ''}`} onClick={() => navigate({ name: item.name })}><Icon name={item.icon} /><span>{item.label}</span></button>)}
       </nav>
       <div className="sidebar-spacer" />
-      <div className="sidebar-note"><div className="sidebar-note-icon"><Icon name="shield" size={17} /></div><div><strong>Built for trust</strong><p>On-chain text stays untrusted by design.</p></div></div>
+      <div className="sidebar-note"><div className="sidebar-note-icon"><Icon name="shield" size={17} /></div><div><strong>Built for agent safety</strong><p>Current evidence leads. Memory only supports.</p></div></div>
       <button className={`nav-link sidebar-settings ${page.name === 'settings' ? 'active' : ''}`} onClick={() => navigate({ name: 'settings' })}><Icon name="settings" /><span>Settings</span><span className={`health-dot ${health?.status === 'ready' ? 'dot-good' : 'dot-muted'}`} /></button>
       <div className="sidebar-profile"><span className="avatar">{userId.slice(0, 2).toUpperCase() || 'SI'}</span><div className="profile-info"><strong>Connected user</strong><span>{userId ? `${userId.slice(0, 8)}…${userId.slice(-4)}` : 'SIEVE workspace'}</span></div><button className="icon-button profile-menu" onClick={disconnect} title="Disconnect" aria-label="Disconnect"><Icon name="back" size={16} /></button></div>
     </aside>
     <main className="main-panel">
-      <header className="topbar"><div className="breadcrumbs"><span>Workspace</span><span className="crumb-sep">/</span><strong>{pageTitle}</strong></div><div className="topbar-actions"><span className={`connection-pill ${health?.status === 'ready' ? 'connection-ready' : ''}`}><i />{health?.status === 'ready' ? 'Systems operational' : 'Systems unavailable'}</span><button className="button button-primary button-small" onClick={() => navigate({ name: 'inspect' })}><Icon name="scan" size={15} /> New inspection</button></div></header>
+      <header className="topbar"><div className="breadcrumbs"><span>Workspace</span><span className="crumb-sep">/</span><strong>{pageTitle}</strong></div><div className="topbar-actions"><span className={`connection-pill ${health?.status === 'ready' ? 'connection-ready' : ''}`}><i />{health?.status === 'ready' ? 'Systems operational' : 'Systems unavailable'}</span><button className="button button-primary button-small" onClick={() => navigate({ name: 'inspect' })}><Icon name="scan" size={15} /> Protect content</button></div></header>
       <div className="content-wrap">
         {globalError && <div className="global-alert" role="alert"><Icon name="alert" size={17} /><span>{globalError}</span><button onClick={() => setGlobalError('')} aria-label="Dismiss error">×</button></div>}
-        {page.name === 'overview' && <Overview cases={cases} stats={stats} loading={loadingCases} onOpen={navigate} onLoadMore={loadMore} nextCursor={nextCursor} loadingMore={loadingMore} />}
-        {page.name === 'inspect' && <InspectPage onCreated={(record) => { setCases((previous) => [record, ...previous.filter((item) => item.id !== record.id)]); navigate({ name: 'case', caseId: record.id }) }} />}
-        {page.name === 'case' && <CaseDetail inspectionCase={currentCase?.id === page.caseId ? currentCase : null} loading={!caseError && currentCase?.id !== page.caseId} error={caseError} onBack={() => navigate({ name: 'overview' })} onRetry={retry} />}
+        {page.name === 'overview' && <AgentOverview health={health} assessments={recentAgentAssessments} onProtect={() => navigate({ name: 'inspect' })} onSuiEvidence={() => navigate({ name: 'sui' })} />}
+        {page.name === 'inspect' && <AgentProtectionPage idToken={token} onAssessment={recordAgentAssessment} />}
+        {page.name === 'sui' && <Overview cases={cases} stats={stats} loading={loadingCases} onOpen={navigate} onLoadMore={loadMore} nextCursor={nextCursor} loadingMore={loadingMore} />}
+        {page.name === 'sui-inspect' && <InspectPage onCreated={(record) => { setCases((previous) => [record, ...previous.filter((item) => item.id !== record.id)]); navigate({ name: 'case', caseId: record.id }) }} />}
+        {page.name === 'case' && <CaseDetail inspectionCase={currentCase?.id === page.caseId ? currentCase : null} loading={!caseError && currentCase?.id !== page.caseId} error={caseError} onBack={() => navigate({ name: 'sui' })} onRetry={retry} />}
         {page.name === 'settings' && <SettingsPage health={health} />}
         {page.name === 'memory' && <ThreatMemoryPage token={token} onOpenCase={(caseId) => navigate({ name: 'case', caseId })} />}
         {page.name === 'evaluations' && <EvaluationsPage token={token} />}
-        <footer className="page-footer"><span>SIEVE <span className="footer-dot">·</span> Read-only evidence analysis</span><span>Chain text is always treated as untrusted input</span></footer>
+        <footer className="page-footer"><span>SIEVE <span className="footer-dot">·</span> Agent defense infrastructure</span><span>Sui evidence is an optional integration</span></footer>
       </div>
     </main>
   </div>
@@ -313,7 +364,7 @@ function Overview({ cases, stats, loading, onOpen, onLoadMore, nextCursor, loadi
   onOpen: (destination: Page) => void; onLoadMore: () => void; nextCursor: string | null; loadingMore: boolean
 }) {
   return <>
-    <section className="page-heading heading-row"><div><p className="eyebrow">SECURITY OBSERVABILITY <span>•</span> SUI NETWORK</p><h1>Evidence intelligence</h1><p className="page-subtitle">A clear view of what your agent reads, what it should distrust, and why.</p></div><button className="button button-primary" onClick={() => onOpen({ name: 'inspect' })}><Icon name="scan" /> Inspect evidence</button></section>
+    <section className="page-heading heading-row"><div><p className="eyebrow">OPTIONAL EVIDENCE SOURCE <span>•</span> SUI</p><h1>Sui evidence inspections</h1><p className="page-subtitle">Fetch an object or transaction when chain evidence is useful. Direct-content agent defense remains available independently.</p></div><button className="button button-primary" onClick={() => onOpen({ name: 'sui-inspect' })}><Icon name="scan" /> Inspect Sui evidence</button></section>
     <section className="metrics-grid" aria-label="Inspection summary">
       <Metric label="Inspections" value={loading ? '—' : stats.total.toLocaleString()} detail="Cases in this workspace" icon="scan" tone="mint" />
       <Metric label="Signals detected" value={loading ? '—' : stats.flagged.toString()} detail="Evidence with manipulation signals" icon="alert" tone="coral" />
@@ -323,13 +374,13 @@ function Overview({ cases, stats, loading, onOpen, onLoadMore, nextCursor, loadi
     <div className="dashboard-grid">
         <section className="panel cases-panel">
         <div className="panel-heading"><div><h2>Inspection history</h2><p>Evidence and assessments from your workspace</p></div><span className="panel-count">{stats.total} loaded</span></div>
-        {loading ? <div className="table-loading"><span className="spinner" /> Loading inspection history…</div> : cases.length === 0 ? <div className="empty-state"><div className="empty-icon"><Icon name="scan" size={22} /></div><h3>No inspections yet</h3><p>Start with a Sui object ID or transaction digest. SIEVE will fetch the evidence and process it in a case you can revisit.</p><button className="button button-secondary" onClick={() => onOpen({ name: 'inspect' })}>Create first inspection <Icon name="arrow" size={15} /></button></div> : <CaseTable cases={cases} onOpen={(id) => onOpen({ name: 'case', caseId: id })} />}
+        {loading ? <div className="table-loading"><span className="spinner" /> Loading Sui case history…</div> : cases.length === 0 ? <div className="empty-state"><div className="empty-icon"><Icon name="scan" size={22} /></div><h3>No Sui cases yet</h3><p>Inspect a Sui object or transaction when chain evidence is relevant. For arbitrary agent content, use Protect content.</p><button className="button button-secondary" onClick={() => onOpen({ name: 'sui-inspect' })}>Inspect Sui evidence <Icon name="arrow" size={15} /></button></div> : <CaseTable cases={cases} onOpen={(id) => onOpen({ name: 'case', caseId: id })} />}
         {nextCursor && <div className="panel-bottom"><button className="text-button" onClick={onLoadMore} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load older cases'} <Icon name="arrow" size={14} /></button></div>}
       </section>
       <aside className="trust-panel">
         <div className="trust-panel-top"><div className="trust-icon"><Icon name="shield" size={20} /></div><span className="trust-label">TRUST BOUNDARY</span></div>
-        <h2>Evidence stays evidence.</h2><p>Every assessment is grounded in fresh chain data. Descriptions and event text remain quarantined as untrusted content.</p>
-        <div className="trust-steps"><div className="trust-step"><span className="step-check">1</span><div><strong>Fetch from chain</strong><span>Source and network recorded</span></div></div><div className="trust-step"><span className="step-check">2</span><div><strong>Separate text from facts</strong><span>Attacker controlled content stays inert</span></div></div><div className="trust-step"><span className="step-check">3</span><div><strong>Report uncertainty</strong><span>Missing evidence is never a clean result</span></div></div></div>
+        <h2>Current evidence leads.</h2><p>Chain facts and attacker-controlled text stay distinct. Validated threat memory can add context, but it cannot replace current evidence or policy.</p>
+        <div className="trust-steps"><div className="trust-step"><span className="step-check">1</span><div><strong>Fetch the source</strong><span>Network and provenance recorded</span></div></div><div className="trust-step"><span className="step-check">2</span><div><strong>Assess the content</strong><span>Untrusted text cannot issue instructions</span></div></div><div className="trust-step"><span className="step-check">3</span><div><strong>Enforce the decision</strong><span>Uncertainty stays visible</span></div></div></div>
         <button className="text-button trust-link" onClick={() => onOpen({ name: 'settings' })}>View system status <Icon name="arrow" size={14} /></button>
       </aside>
     </div>
@@ -468,21 +519,21 @@ function ThreatMemoryPage({ token, onOpenCase }: { token: string; onOpenCase: (c
   }
 
   return <>
-    <section className="page-heading"><p className="eyebrow">CROSS-SESSION DEFENSE <span>•</span> EVIDENCE-BACKED RECORDS</p><h1>Threat memory</h1><p className="page-subtitle">Review normalized threat records and their write status. Memory can raise suspicion, but each case still needs fresh chain evidence.</p></section>
+    <section className="page-heading"><p className="eyebrow">SUI CASE WORKFLOW <span>•</span> LEGACY MEMORY WRITES</p><h1>Sui memory activity</h1><p className="page-subtitle">This view lists memory writes from the Sui case-inspection workflow. It is separate from validated agent threat memory; only explicitly reviewed active records can be recalled by agent inspections.</p></section>
     {error && <div className="global-alert" role="alert"><Icon name="alert" size={17} /><span>{error}</span><button onClick={() => setError('')} aria-label="Dismiss error">×</button></div>}
     <section className="memory-summary-grid"><Metric label="Records loaded" value={loading ? '—' : memories.length.toString()} detail="Current history pages" icon="memory" tone="mint" /><Metric label="Completed writes" value={loading ? '—' : memories.filter((memory) => memory.status === 'completed').length.toString()} detail="Status recorded by the API" icon="shield" tone="blue" /><Metric label="Needs attention" value={loading ? '—' : memories.filter((memory) => memory.status === 'failed').length.toString()} detail="Failed or incomplete writes" icon="alert" tone="amber" /></section>
     <section className="panel memory-panel">
-      <div className="panel-heading memory-heading"><div><h2>Memory records</h2><p>Normalized records saved by the controlled assessment workflow</p></div><span className="panel-count">{memories.length} loaded</span></div>
+      <div className="panel-heading memory-heading"><div><h2>Sui case memory writes</h2><p>Legacy chain-case write status; not the reviewed agent threat-memory registry</p></div><span className="panel-count">{memories.length} loaded</span></div>
       <div className="memory-toolbar"><label className="memory-search"><Icon name="grid" size={15} /><span className="sr-only">Search memory records</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search pattern, case, or record" /></label><label className="filter-label">Status<select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option><option value="pending">Pending</option><option value="accepted">Accepted</option><option value="uploaded">Uploaded</option><option value="completed">Completed</option><option value="failed">Failed</option></select></label></div>
-      {loading ? <div className="table-loading"><span className="spinner" /> Loading memory history…</div> : memories.length === 0 ? <div className="empty-state"><div className="empty-icon"><Icon name="memory" size={22} /></div><h3>No threat memory records yet</h3><p>Records will appear here when an assessment is approved for memory storage. Raw chain text is not stored as trusted threat knowledge.</p></div> : filtered.length === 0 ? <div className="muted-empty memory-filter-empty">No records match these filters.</div> : <div className="table-scroll"><table className="memory-table"><thead><tr><th>Pattern</th><th>Source case</th><th>Write status</th><th>Created</th><th><span className="sr-only">Details</span></th></tr></thead><tbody>{filtered.map((memory) => <tr key={memory.id} onClick={() => void openMemory(memory)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') void openMemory(memory) }}><td><span className="memory-pattern">{memory.pattern.replaceAll('_', ' ')}</span><span className="memory-id">{memory.id.slice(0, 8)}</span></td><td><button className="case-link" onClick={(event) => { event.stopPropagation(); onOpenCase(memory.caseId) }}>{memory.caseId.slice(0, 8)}… <Icon name="arrow" size={12} /></button></td><td><span className={`memory-status memory-${memory.status}`}><i />{memory.status}</span></td><td className="time-cell">{relativeTime(memory.createdAt)}</td><td><button className="row-arrow" onClick={(event) => { event.stopPropagation(); void openMemory(memory) }} aria-label={`View memory record ${memory.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>}
+      {loading ? <div className="table-loading"><span className="spinner" /> Loading Sui memory-write history…</div> : memories.length === 0 ? <div className="empty-state"><div className="empty-icon"><Icon name="memory" size={22} /></div><h3>No Sui memory writes yet</h3><p>Agent threat memory follows a separate candidate, review, and promotion lifecycle. A detector result alone does not make memory trusted.</p></div> : filtered.length === 0 ? <div className="muted-empty memory-filter-empty">No records match these filters.</div> : <div className="table-scroll"><table className="memory-table"><thead><tr><th>Pattern</th><th>Source case</th><th>Write status</th><th>Created</th><th><span className="sr-only">Details</span></th></tr></thead><tbody>{filtered.map((memory) => <tr key={memory.id} onClick={() => void openMemory(memory)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') void openMemory(memory) }}><td><span className="memory-pattern">{memory.pattern.replaceAll('_', ' ')}</span><span className="memory-id">{memory.id.slice(0, 8)}</span></td><td><button className="case-link" onClick={(event) => { event.stopPropagation(); onOpenCase(memory.caseId) }}>{memory.caseId.slice(0, 8)}… <Icon name="arrow" size={12} /></button></td><td><span className={`memory-status memory-${memory.status}`}><i />{memory.status}</span></td><td className="time-cell">{relativeTime(memory.createdAt)}</td><td><button className="row-arrow" onClick={(event) => { event.stopPropagation(); void openMemory(memory) }} aria-label={`View memory record ${memory.id}`}><Icon name="arrow" size={16} /></button></td></tr>)}</tbody></table></div>}
       {nextCursor && !loading && <div className="panel-bottom"><button className="text-button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? 'Loading…' : 'Load older records'} <Icon name="arrow" size={14} /></button></div>}
     </section>
-    {selected && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelected(null); setDetail(null) } }}><section className="memory-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-dialog-title"><div className="dialog-heading"><div><p className="eyebrow">STORED THREAT RECORD <span>•</span> UNTRUSTED DATA</p><h2 id="memory-dialog-title">{selected.pattern.replaceAll('_', ' ')}</h2></div><button className="dialog-close" onClick={() => { setSelected(null); setDetail(null) }} aria-label="Close record details">×</button></div>{detailLoading ? <div className="dialog-loading"><span className="spinner" /> Loading record…</div> : <><div className="dialog-meta"><div><span>Status</span><strong className={`memory-status memory-${(detail ?? selected).status}`}><i />{(detail ?? selected).status}</strong></div><div><span>Source case</span><button className="case-link" onClick={() => onOpenCase(selected.caseId)}>{selected.caseId.slice(0, 8)}… <Icon name="arrow" size={12} /></button></div><div><span>Created</span><strong>{new Date((detail ?? selected).createdAt).toLocaleString()}</strong></div>{(detail ?? selected).failureCode && <div><span>Failure code</span><strong>{(detail ?? selected).failureCode}</strong></div>}</div><div className="record-boundary"><Icon name="shield" size={16} /><span>Stored memory is untrusted data. It may inform risk handling but cannot replace evidence from this case.</span></div><h3 className="record-label">Normalized record <span className="untrusted-tag"><Icon name="lock" size={11} /> UNTRUSTED</span></h3><pre className="record-json">{JSON.stringify((detail ?? selected).normalizedRecord, null, 2)}</pre>{(detail ?? selected).blobId && <div className="dialog-meta"><div><span>Walrus blob</span><strong className="mono">{(detail ?? selected).blobId}</strong></div></div>}</>}</section></div>}
+    {selected && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) { setSelected(null); setDetail(null) } }}><section className="memory-dialog" role="dialog" aria-modal="true" aria-labelledby="memory-dialog-title"><div className="dialog-heading"><div><p className="eyebrow">LEGACY SUI MEMORY WRITE <span>•</span> UNTRUSTED DATA</p><h2 id="memory-dialog-title">{selected.pattern.replaceAll('_', ' ')}</h2></div><button className="dialog-close" onClick={() => { setSelected(null); setDetail(null) }} aria-label="Close record details">×</button></div>{detailLoading ? <div className="dialog-loading"><span className="spinner" /> Loading record…</div> : <><div className="dialog-meta"><div><span>Write status</span><strong className={`memory-status memory-${(detail ?? selected).status}`}><i />{(detail ?? selected).status}</strong></div><div><span>Source case</span><button className="case-link" onClick={() => onOpenCase(selected.caseId)}>{selected.caseId.slice(0, 8)}… <Icon name="arrow" size={12} /></button></div><div><span>Created</span><strong>{new Date((detail ?? selected).createdAt).toLocaleString()}</strong></div>{(detail ?? selected).failureCode && <div><span>Failure code</span><strong>{(detail ?? selected).failureCode}</strong></div>}</div><div className="record-boundary"><Icon name="shield" size={16} /><span>This legacy write is untrusted and does not indicate the record has passed the agent threat-memory review lifecycle.</span></div><h3 className="record-label">Stored payload <span className="untrusted-tag"><Icon name="lock" size={11} /> UNTRUSTED</span></h3><pre className="record-json">{JSON.stringify((detail ?? selected).normalizedRecord, null, 2)}</pre>{(detail ?? selected).blobId && <div className="dialog-meta"><div><span>Walrus blob</span><strong className="mono">{(detail ?? selected).blobId}</strong></div></div>}</>}</section></div>}
   </>
 }
 
 function SettingsPage({ health }: { health: Health | null }) {
-  const names: Record<string, string> = { database: 'PostgreSQL database', authentication: 'Identity provider', tatum: 'Tatum Sui gRPC', walrusMemory: 'Walrus Memory', semanticJudge: 'Optional OpenAI semantic judge' }
+  const names: Record<string, string> = { database: 'PostgreSQL database', authentication: 'Identity provider', tatum: 'Optional Tatum Sui evidence', walrusMemory: 'Walrus Memory', semanticJudge: 'Optional semantic judge' }
   return <>
     <section className="page-heading"><p className="eyebrow">WORKSPACE CONFIGURATION</p><h1>System status</h1><p className="page-subtitle">Integration availability reported by the SIEVE API. Secret values are never displayed here.</p></section>
     <section className="panel integration-panel"><div className="panel-heading"><div><h2>Connected services</h2><p>Health reflects server configuration and provider availability.</p></div><span className={`health-summary ${health?.status === 'ready' ? 'summary-good' : 'summary-bad'}`}><i />{health?.status === 'ready' ? 'Required systems ready' : 'Required systems unavailable'}</span></div>{health ? <div className="integration-list">{Object.entries(health.integrations).map(([key, status]) => <div className="integration-row" key={key}><span className="integration-icon"><Icon name={key === 'database' ? 'grid' : key === 'authentication' ? 'lock' : key === 'tatum' ? 'scan' : key === 'semanticJudge' ? 'shield' : 'memory'} size={17} /></span><div className="integration-name"><strong>{names[key] ?? key}</strong><span>{status === 'available' ? 'Connection verified' : status === 'unverified' ? 'Configured, not yet verified' : status === 'not_configured' ? 'Not configured on the API' : 'Connection unavailable'}{key === 'semanticJudge' ? ' · Optional; does not gate readiness' : ''}</span></div><span className={`integration-status integration-${status}`}><i />{status.replaceAll('_', ' ')}</span></div>)}</div> : <div className="inline-empty"><span className="spinner" /><span>Could not retrieve current integration health. Check that the API is reachable.</span></div>}</section>
